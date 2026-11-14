@@ -78,7 +78,7 @@ uv run birdweather-mcp --transport streamable-http --host 127.0.0.1 --port 8000
 
 ## Find your station ID and token
 
-**Station ID** (public, numeric — e.g. `12345`):
+**Station ID** (public, numeric — e.g. `12345` or `<STATION_ID>` in docs):
 
 1. Open your station on [app.birdweather.com](https://app.birdweather.com) (web) or in the BirdWeather app.
 2. Check the URL: `https://app.birdweather.com/stations/<id>` — that number is `station_id`.
@@ -204,7 +204,7 @@ See `.env.example` for a local template.
 
 ## Tools
 
-Full parameter lists and **live sample JSON** (station `12345`): [docs/tools.md](docs/tools.md).
+Full parameter lists and **sample JSON** (placeholders — use your own station id): [docs/tools.md](docs/tools.md).
 
 | Tool | Params (common) | Example prompt |
 |------|-----------------|----------------|
@@ -217,7 +217,7 @@ Full parameter lists and **live sample JSON** (station `12345`): [docs/tools.md]
 | `daily_counts` | `station_id`, `days`, `species`, `include_species_breakdown` | “Daily detection totals at 12345 for the last 3 days.” |
 | `species_info` | `species_id` / `scientific_name` / `query` | “Tell me about Haemorhous mexicanus.” |
 | `search_species` | `query`, `limit`, `after` | “Search the catalog for ‘raven’.” |
-| `search_stations` | `lat`, `lon`, `radius_km`, `query` | “Find stations within 20 km of 40.0, −105.0.” |
+| `search_stations` | `lat`, `lon`, `radius_km`, `query` | “Find stations within 20 km of 37.77, −122.42.” |
 
 ### Period defaults
 
@@ -239,7 +239,7 @@ Full parameter lists and **live sample JSON** (station `12345`): [docs/tools.md]
 
 ---
 
-**You:** What’s near west Example City?
+**You:** What stations are near 37.77, −122.42?
 
 **Assistant:** *(calls `search_stations` with lat/lon)* Lists nearby PUCs and BirdNET-Pi stations with `distance_km`.
 
@@ -303,8 +303,8 @@ No. Any public station id works with GraphQL. A token only unlocks REST for *you
 **Is the token sent to the LLM?**  
 Tool results do not include the token. Keep it in env/config only; don’t paste it into chat.
 
-**What’s station 12345?**  
-A convenient public west–Example City example used in docs and live tests — not hardcoded in the server.
+**Where do I find my station ID?**  
+Open your station on [app.birdweather.com](https://app.birdweather.com); the URL is `…/stations/<id>`. Docs use placeholders like `12345` — substitute your own.
 
 **Can I expose this on the internet?**  
 Not recommended without auth. Prefer Tailscale / LAN bind. Details in [SECURITY.md](SECURITY.md).
@@ -314,7 +314,8 @@ Not recommended without auth. Prefer Tailscale / LAN bind. Details in [SECURITY.
 ```bash
 uv sync --dev
 uv run pytest                 # unit tests (mocked network)
-uv run pytest -m live         # optional live smoke (station 12345)
+# Live smoke needs a public station id (skipped if unset):
+BIRDWEATHER_TEST_STATION_ID=<STATION_ID> uv run pytest -m live
 ```
 
 ## Contributing & license

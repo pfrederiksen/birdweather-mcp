@@ -24,11 +24,12 @@ uv run birdweather-mcp --transport streamable-http --host 127.0.0.1 --port 8000
 # unit tests (mocked network — default)
 uv run pytest
 
-# optional live smoke against public GraphQL (station 12345)
-uv run pytest -m live
+# optional live smoke against public GraphQL
+# Set BIRDWEATHER_TEST_STATION_ID to a public station id; tests skip if unset.
+BIRDWEATHER_TEST_STATION_ID=<STATION_ID> uv run pytest -m live
 ```
 
-Do not commit real `BIRDWEATHER_STATION_TOKEN` values. Use `.env` locally (gitignored).
+Do not commit real `BIRDWEATHER_STATION_TOKEN` or personal station ids. Use `.env` locally (gitignored).
 
 ## Guidelines
 

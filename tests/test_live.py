@@ -1,19 +1,28 @@
 """Optional live smoke tests against the public BirdWeather GraphQL API.
 
-Run with: pytest -m live
+Requires BIRDWEATHER_TEST_STATION_ID (a public numeric station id).
+Skipped when that env var is unset.
+
+Run with: BIRDWEATHER_TEST_STATION_ID=<STATION_ID> pytest -m live
 """
 
 from __future__ import annotations
+
+import os
 
 import pytest
 
 from birdweather_mcp.client import BirdWeatherClient
 
-# Public example station (west Example City). Not hardcoded in the server.
-EXAMPLE_STATION_ID = "12345"
+STATION_ID = os.environ.get("BIRDWEATHER_TEST_STATION_ID", "").strip()
 
-
-pytestmark = pytest.mark.live
+pytestmark = [
+    pytest.mark.live,
+    pytest.mark.skipif(
+        not STATION_ID,
+        reason="BIRDWEATHER_TEST_STATION_ID not set",
+    ),
+]
 
 
 @pytest.fixture(scope="module")
@@ -24,28 +33,27 @@ def live_client():
 
 
 def test_live_get_station(live_client: BirdWeatherClient):
-    out = live_client.get_station(EXAMPLE_STATION_ID)
+    out = live_client.get_station(STATION_ID)
     station = out["station"]
-    assert station["id"] == EXAMPLE_STATION_ID
+    assert station["id"] == STATION_ID
     assert station.get("timezone")
     assert station.get("coords")
 
 
 def test_live_recent_detections(live_client: BirdWeatherClient):
     out = live_client.recent_detections(
-        EXAMPLE_STATION_ID, days=2, limit=5, min_confidence=0.5
+        STATION_ID, days=2, limit=5, min_confidence=0.5
     )
     assert "detections" in out
     assert out["source"] == "graphql"
-    # Station is active; expect at least some activity over two days, but
-    # don't fail hard if the window is quiet — schema/shape is what matters.
+    # Station may be quiet — schema/shape is what matters.
     for det in out["detections"]:
         assert "timestamp" in det
         assert "species" in det or "speciesId" in det
 
 
 def test_live_top_species(live_client: BirdWeatherClient):
-    out = live_client.top_species(EXAMPLE_STATION_ID, days=14, limit=5)
+    out = live_client.top_species(STATION_ID, days=14, limit=5)
     assert isinstance(out["species"], list)
     if out["species"]:
         assert out["species"][0]["species"]["commonName"]
@@ -54,22 +62,22 @@ def test_live_top_species(live_client: BirdWeatherClient):
 
 def test_live_daily_counts(live_client: BirdWeatherClient):
     out = live_client.daily_counts(
-        EXAMPLE_STATION_ID, days=3, include_species_breakdown=False
+        STATION_ID, days=3, include_species_breakdown=False
     )
     assert isinstance(out["days"], list)
 
 
-def test_live_search_stations_near_vegas(live_client: BirdWeatherClient):
+def test_live_search_stations_near_test_station(live_client: BirdWeatherClient):
+    station = live_client.get_station(STATION_ID)["station"]
+    coords = station.get("coords") or {}
+    lat, lon = coords.get("lat"), coords.get("lon")
+    assert lat is not None and lon is not None
     out = live_client.search_stations(
-        lat=40.0, lon=-105.0, radius_km=30, limit=5
+        lat=lat, lon=lon, radius_km=30, limit=5
     )
     assert out["stations"]
-    ids = {s["id"] for s in out["stations"]}
-    # Nearby search should usually include the example station, but coords/privacy
-    # can vary — just ensure we got stations with coords.
     for st in out["stations"]:
         assert st.get("coords")
-    assert ids  # non-empty
 
 
 def test_live_species_info_raven(live_client: BirdWeatherClient):

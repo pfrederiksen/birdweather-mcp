@@ -10,7 +10,7 @@ Public GraphQL needs **no token**. Set `BIRDWEATHER_STATION_TOKEN` only when you
 - `days=N` = last N calendar days **including today** in that timezone.
 - Prefer either `days` **or** `from_date`/`to_date`, not both.
 
-Samples below were captured live against public station **12345** (`America/Los_Angeles`) via GraphQL. Counts and detections change over time — treat them as shape references.
+Samples below use a generic placeholder station (`12345` / “Example Station”) and keep the live response shape. Counts and detections change over time — treat them as shape references. Find your real id at `https://app.birdweather.com/stations/<id>`.
 
 ---
 
@@ -32,10 +32,10 @@ Station metadata: name, coords, timezone, detection range / thresholds. With a t
     "location": null,
     "continent": "North America",
     "country": "United States",
-    "state": "Nevada",
+    "state": "California",
     "coords": {
-      "lat": 40.0,
-      "lon": -105.0
+      "lat": 37.77,
+      "lon": -122.42
     },
     "earliestDetectionAt": "2026-03-26T14:51:16-07:00",
     "latestDetectionAt": "2026-11-14T09:00:05-08:00",
@@ -355,23 +355,23 @@ Stations near a lat/lon (default 25 km) and/or by name. Geographic hits include 
 {
   "stations": [
     {
-      "id": "18484",
-      "name": "BirdNET-Pi - banana",
-      "type": "birdnetpi",
+      "id": "12345",
+      "name": "Example Station",
+      "type": "puc",
       "timezone": "America/Los_Angeles",
       "continent": "North America",
       "country": "United States",
-      "state": "Nevada",
-      "coords": { "lat": 36.1468, "lon": -115.2364 },
-      "distance_km": 12.27
+      "state": "California",
+      "coords": { "lat": 37.77, "lon": -122.42 },
+      "distance_km": 1.2
     },
     {
-      "id": "13197",
-      "name": "BirdNugget",
-      "type": "puc",
+      "id": "67890",
+      "name": "Nearby Example Pi",
+      "type": "birdnetpi",
       "timezone": "America/Los_Angeles",
-      "coords": { "lat": 36.073284, "lon": -115.287018 },
-      "distance_km": 13.08
+      "coords": { "lat": 37.78, "lon": -122.41 },
+      "distance_km": 2.4
     }
   ],
   "total_count": 8,
