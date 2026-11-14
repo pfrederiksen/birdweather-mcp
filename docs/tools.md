@@ -4,11 +4,16 @@ All tools return **JSON strings** (pretty-printed). Errors look like `{"error": 
 
 Public GraphQL needs **no token**. Set `BIRDWEATHER_STATION_TOKEN` only when you want station REST for richer detection fields / all-time stats.
 
-**Period rules**
+**Unknown arguments**
+
+Unknown `tools/call` argument keys are **rejected** (`is_error` tool result with an `{"error": "..."}` message listing valid names). They are not silently ignored. There is no `period` parameter — use `days` or `from_date`/`to_date` (or `since`/`until` on `first_of_year` / `new_arrivals`).
+
+**Time window rules**
 
 - Dates are `YYYY-MM-DD` in the station timezone (or an explicit IANA `timezone`).
 - `days=N` = last N calendar days **including today** in that timezone.
 - Prefer either `days` **or** `from_date`/`to_date`, not both.
+- There is no `period` argument.
 
 Samples below use a generic placeholder station (`12345` / “Example Station”) and keep the live response shape. Counts and detections change over time — treat them as shape references. Find your real id at `https://app.birdweather.com/stations/<id>` — see [configuration.md](configuration.md).
 
