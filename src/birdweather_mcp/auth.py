@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import os
 from collections.abc import Iterable
 
@@ -38,10 +39,23 @@ def extract_bearer_token(authorization: str | None) -> str | None:
     return token or None
 
 
+def tokens_match(presented: str, expected: str) -> bool:
+    """Constant-time equality check for bearer tokens."""
+    a = presented.encode("utf-8")
+    b = expected.encode("utf-8")
+    if len(a) != len(b):
+        # Dummy compare keeps the equal-length path honest under timing analysis.
+        hmac.compare_digest(b, b)
+        return False
+    return hmac.compare_digest(a, b)
+
+
 class BearerAuthMiddleware:
     """Require ``Authorization: Bearer <MCP_AUTH_TOKEN>`` except public paths.
 
     When ``expected_token`` is empty/None, all requests pass through.
+    When a token is set: HTTP is gated, websockets are rejected (1008), and only
+    the ``lifespan`` scope bypasses the gate. ``/health`` is public (exact path).
     """
 
     def __init__(
@@ -56,8 +70,21 @@ class BearerAuthMiddleware:
         self.public_paths = public_paths
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not self.expected_token:
+        if not self.expected_token:
             await self.app(scope, receive, send)
+            return
+
+        scope_type = scope["type"]
+        if scope_type == "lifespan":
+            await self.app(scope, receive, send)
+            return
+
+        if scope_type == "websocket":
+            await send({"type": "websocket.close", "code": 1008})
+            return
+
+        if scope_type != "http":
+            # Unknown ASGI scopes are not allowed when a token is configured.
             return
 
         path = scope.get("path") or ""
@@ -67,7 +94,7 @@ class BearerAuthMiddleware:
 
         authorization = _header_value(scope.get("headers") or [], b"authorization")
         presented = extract_bearer_token(authorization)
-        if presented is not None and presented == self.expected_token:
+        if presented is not None and tokens_match(presented, self.expected_token):
             await self.app(scope, receive, send)
             return
 
