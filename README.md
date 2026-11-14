@@ -1,55 +1,102 @@
+<p align="center">
+  <img src="docs/assets/header.jpg" alt="birdweather-mcp" width="100%" />
+</p>
+
+<p align="center"><em>Ask your AI about the birds your station is hearing — detections, species, and stats via MCP.</em></p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python 3.11+" /></a>
+  <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-compatible-green.svg" alt="MCP compatible" /></a>
+  <a href="docs/self-hosting.md"><img src="https://img.shields.io/badge/docker-ready-2496ED.svg" alt="Docker ready" /></a>
+</p>
+
 # birdweather-mcp
 
-Self-hostable [MCP](https://modelcontextprotocol.io) server for [BirdWeather](https://www.birdweather.com) stations. Clone it, run it locally, and plug it into Claude Desktop, Cursor, or any MCP client to query detections, species, and station stats.
+Self-hostable [MCP](https://modelcontextprotocol.io) server for [BirdWeather](https://www.birdweather.com). Point Claude, Cursor, or any MCP client at your (or any public) station and ask natural-language questions about what was detected, what’s trending, and what’s nearby.
 
-Uses the public GraphQL API at `https://app.birdweather.com/graphql` (no auth). Optionally set `BIRDWEATHER_STATION_TOKEN` for the station REST API (`/api/v1/stations/<token>/...`) for richer fields. **The token is never logged or echoed.**
+Works out of the box against the **public GraphQL API** — no account required. Optionally set a **station token** for richer REST fields. **The token is never logged or echoed.**
 
-## Requirements
+## Why this exists
 
-- Python 3.11+
-- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+BirdWeather already records rich detection data. This server makes that data **tool-callable** for LLM clients: structured JSON tools instead of scraping the website or hand-writing GraphQL. Clone it, run it locally or on a NAS, keep your token on your machine.
 
-## Install & run
+## Features
+
+- **10 MCP tools** — station info, counts, weather, detections, top species, daily series, species search/profiles, nearby stations
+- **No auth required** for public GraphQL; optional `BIRDWEATHER_STATION_TOKEN` for REST
+- **stdio** (Claude Desktop / Cursor) or **streamable-HTTP** (Docker / Synology / Tailscale)
+- **Period helpers** — `days=N` or `from_date`/`to_date` in the station’s timezone
+- **Token-safe** — redacted in logs and errors ([SECURITY.md](SECURITY.md))
+- **Docker + compose** — multi-arch `python:3.12-slim` (amd64 / arm64, including Synology DS223j-class NAS)
+
+## Quickstart (< 60 seconds)
+
+**uvx** (no clone):
 
 ```bash
-# one-shot via uvx (from GitHub)
 uvx --from git+https://github.com/pfrederiksen/birdweather-mcp birdweather-mcp
+```
 
-# or clone and run locally
+**uv** (local checkout):
+
+```bash
 git clone https://github.com/pfrederiksen/birdweather-mcp.git
 cd birdweather-mcp
 uv sync
 uv run birdweather-mcp
+```
 
-# or with pip
+**pip**:
+
+```bash
 pip install .
 birdweather-mcp
 # equivalent: python -m birdweather_mcp
 ```
 
+**Docker** (stdio for MCP clients that spawn the container):
+
+```bash
+docker build -t birdweather-mcp .
+docker run --rm -i birdweather-mcp
+```
+
+Long-lived HTTP on a NAS / always-on box → [Self-hosting guide](docs/self-hosting.md) (`docker compose up -d`).
+
 ### Transports
 
-- **stdio** (default) — what Claude Desktop and Cursor expect
-- **streamable-http** — optional HTTP for remote/local debugging
+| Transport | Use case |
+|-----------|----------|
+| `stdio` (default) | Claude Desktop, Cursor, VS Code, Claude Code |
+| `streamable-http` | Remote / Docker / Synology (`http://host:8000/mcp`) |
+| `sse` | Legacy SSE clients |
 
 ```bash
 uv run birdweather-mcp --transport streamable-http --host 127.0.0.1 --port 8000
 ```
 
-### Docker
+## Find your station ID and token
 
-```bash
-docker build -t birdweather-mcp .
-docker run --rm -i birdweather-mcp
-# optional token + HTTP:
-docker run --rm -e BIRDWEATHER_STATION_TOKEN -e MCP_TRANSPORT=streamable-http -p 8000:8000 birdweather-mcp --transport streamable-http --host 0.0.0.0
-```
+**Station ID** (public, numeric — e.g. `12345`):
+
+1. Open your station on [app.birdweather.com](https://app.birdweather.com) (web) or in the BirdWeather app.
+2. Check the URL: `https://app.birdweather.com/stations/<id>` — that number is `station_id`.
+3. You can also search by name/coords with the `search_stations` tool once the server is running.
+
+**Station token** (secret — optional):
+
+1. In the BirdWeather app or web UI, open **your** station’s settings.
+2. Find the **API / token** section (used for `https://app.birdweather.com/api/v1/stations/<token>/...`).
+3. Copy the token into `BIRDWEATHER_STATION_TOKEN` in your MCP config or `.env` — never commit it.
+
+Without a token, all GraphQL tools still work for any public station. With a token, `get_station` can include all-time REST stats and `recent_detections` prefers REST (extra fields).
 
 ## Configure MCP clients
 
 ### Claude Desktop
 
-Add to `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/`):
+`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or the equivalent on Windows:
 
 ```json
 {
@@ -65,7 +112,7 @@ Add to `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claud
 }
 ```
 
-Omit `BIRDWEATHER_STATION_TOKEN` (or leave it empty) if you only need the public GraphQL API. For a local checkout:
+Omit `BIRDWEATHER_STATION_TOKEN` (or leave it empty) for public GraphQL only. Local checkout:
 
 ```json
 {
@@ -80,7 +127,7 @@ Omit `BIRDWEATHER_STATION_TOKEN` (or leave it empty) if you only need the public
 
 ### Cursor
 
-Add to `.cursor/mcp.json` (project) or Cursor MCP settings:
+Project `.cursor/mcp.json` or Cursor MCP settings:
 
 ```json
 {
@@ -93,58 +140,185 @@ Add to `.cursor/mcp.json` (project) or Cursor MCP settings:
 }
 ```
 
+### Claude Code
+
+```bash
+claude mcp add birdweather -- uvx --from git+https://github.com/pfrederiksen/birdweather-mcp birdweather-mcp
+```
+
+Or a project `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "birdweather": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/pfrederiksen/birdweather-mcp", "birdweather-mcp"]
+    }
+  }
+}
+```
+
+### VS Code
+
+`.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "birdweather": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/pfrederiksen/birdweather-mcp", "birdweather-mcp"]
+    }
+  }
+}
+```
+
+### Generic MCP / HTTP
+
+Any stdio MCP client can spawn `birdweather-mcp` the same way. For a remote streamable-HTTP server (see [docs/self-hosting.md](docs/self-hosting.md)):
+
+```json
+{
+  "mcpServers": {
+    "birdweather": {
+      "url": "http://127.0.0.1:8000/mcp"
+    }
+  }
+}
+```
+
+Exact key names vary slightly by client version — prefer `url` / `type: "http"` as documented by your client.
+
 ## Environment variables
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `BIRDWEATHER_STATION_TOKEN` | No | Station API token from BirdWeather. Enables REST detections/stats. Never logged. |
+| `BIRDWEATHER_STATION_TOKEN` | No | Station API token. Enables REST detections/stats. **Never logged.** Without it, public GraphQL only. |
 | `MCP_TRANSPORT` | No | `stdio` (default), `streamable-http`, or `sse` |
-| `MCP_HOST` / `MCP_PORT` | No | Bind address for HTTP transports (default `127.0.0.1:8000`) |
+| `MCP_HOST` | No | Bind host for HTTP transports (default `127.0.0.1`) |
+| `MCP_PORT` | No | Bind port for HTTP transports (default `8000`) |
+
+See `.env.example` for a local template.
 
 ## Tools
 
-| Tool | Description |
-|------|-------------|
-| `get_station` | Station name, coords, timezone, detection range, thresholds; REST all-time stats if token set |
-| `station_counts` | Detection + unique-species counts for a period |
-| `get_weather` | Latest weather reading for a station (when available) |
-| `recent_detections` | Detections with time window, species filter, min confidence, limit, cursor pagination |
-| `top_species` / `species_list` | Ranked species for a station/period |
-| `daily_counts` | Per-day totals with optional per-species breakdown |
-| `species_info` | Species profile (names, eBird/Wikipedia, images, summary) |
-| `search_species` | Search the species catalog |
-| `search_stations` | Stations near lat/lon (radius) and/or by name |
+Full parameter lists and **live sample JSON** (station `12345`): [docs/tools.md](docs/tools.md).
+
+| Tool | Params (common) | Example prompt |
+|------|-----------------|----------------|
+| `get_station` | `station_id` | “Describe station 12345 — timezone and coords.” |
+| `station_counts` | `station_id`, `days` / dates | “How many detections and species at 12345 last 7 days?” |
+| `get_weather` | `station_id` | “Any weather reading for station 12345?” |
+| `recent_detections` | `station_id`, `days`, `species`, `min_confidence`, `limit`, `after` | “Show recent House Finch detections at 12345 with confidence ≥ 0.7.” |
+| `top_species` | `station_id`, `days`, `limit`, `offset` | “What are the top species at 12345 this week?” |
+| `species_list` | same as `top_species` | “List species heard at 12345 in the last 14 days.” |
+| `daily_counts` | `station_id`, `days`, `species`, `include_species_breakdown` | “Daily detection totals at 12345 for the last 3 days.” |
+| `species_info` | `species_id` / `scientific_name` / `query` | “Tell me about Haemorhous mexicanus.” |
+| `search_species` | `query`, `limit`, `after` | “Search the catalog for ‘raven’.” |
+| `search_stations` | `lat`, `lon`, `radius_km`, `query` | “Find stations within 20 km of 40.0, −105.0.” |
 
 ### Period defaults
 
 - Dates are `YYYY-MM-DD` in the station timezone (or an explicit IANA timezone).
-- `days=N` means the last N calendar days including today in that timezone.
-- If neither `days` nor dates are given, tools that need a window typically default to 1 day (`recent_detections`) or 7 days (counts / top species).
+- `days=N` means the last N calendar days **including today**.
+- If neither `days` nor dates are given, tools that need a window typically default to **1 day** (`recent_detections`) or **7 days** (counts / top species).
 
-### Example: west Example City station
+## Example conversations
 
-Station **12345** (`America/Los_Angeles`) is a convenient public example for docs and tests—not hardcoded in the server.
+**You:** What’s station 12345 been hearing this week?
 
-Ask your MCP client things like:
+**Assistant:** *(calls `top_species` + `station_counts`)* House Finch leads with hundreds of detections; about 30 species and ~500 detections over the last 7 days in `America/Los_Angeles`.
 
-- “What species has station 12345 heard in the last 7 days?”
-- “Show recent House Finch detections at 12345 with confidence ≥ 0.7”
-- “Find BirdWeather stations within 20 km of 40.0, -105.0”
+---
+
+**You:** Any high-confidence House Finches today? Link me a soundscape if you can.
+
+**Assistant:** *(calls `recent_detections` with `species="House Finch"`, `min_confidence=0.7`, `days=1`)* Returns timestamps, confidence, and `soundscape.url` FLAC links when available.
+
+---
+
+**You:** What’s near west Example City?
+
+**Assistant:** *(calls `search_stations` with lat/lon)* Lists nearby PUCs and BirdNET-Pi stations with `distance_km`.
+
+## Architecture
+
+```mermaid
+flowchart TB
+  subgraph clients [MCP clients]
+    CD[Claude Desktop]
+    CU[Cursor]
+    VS[VS Code / Claude Code]
+  end
+
+  subgraph server [birdweather-mcp]
+    STDIO[stdio transport]
+    HTTP[streamable-HTTP /mcp]
+    TOOLS[Tools]
+    CLIENT[BirdWeatherClient]
+  end
+
+  subgraph birdweather [BirdWeather]
+    GQL[GraphQL API<br/>public]
+    REST[Station REST<br/>token optional]
+  end
+
+  CD --> STDIO
+  CU --> STDIO
+  VS --> STDIO
+  HTTP --> TOOLS
+  STDIO --> TOOLS
+  TOOLS --> CLIENT
+  CLIENT --> GQL
+  CLIENT -.-> REST
+```
+
+## Self-hosting
+
+Run as a long-lived Docker / compose service (LAN, Tailscale, Synology Container Manager, arm64 builds): **[docs/self-hosting.md](docs/self-hosting.md)**.
+
+```bash
+docker compose up -d --build
+# MCP endpoint: http://127.0.0.1:8000/mcp
+```
+
+## Troubleshooting
+
+| Problem | Fix |
+|---------|-----|
+| Client shows no tools | Confirm `uvx`/`uv` is on the PATH the GUI app sees; restart the client after config edits |
+| `Station … not found` | Check the numeric id in the BirdWeather URL; try `search_stations` |
+| Empty detections | Widen `days`, lower `min_confidence`, or confirm the station is active |
+| REST / token errors | Token only needed for REST extras; leave unset for GraphQL. Rotate if leaked |
+| HTTP client can't connect | Use `http://host:8000/mcp`, bind/publish carefully — see self-hosting guide |
+| Docker arm64 “exec format” | Rebuild on the NAS or `docker buildx build --platform linux/arm64` |
+
+## FAQ
+
+**Do I need my own BirdWeather station?**  
+No. Any public station id works with GraphQL. A token only unlocks REST for *your* station.
+
+**Is the token sent to the LLM?**  
+Tool results do not include the token. Keep it in env/config only; don’t paste it into chat.
+
+**What’s station 12345?**  
+A convenient public west–Example City example used in docs and live tests — not hardcoded in the server.
+
+**Can I expose this on the internet?**  
+Not recommended without auth. Prefer Tailscale / LAN bind. Details in [SECURITY.md](SECURITY.md).
 
 ## Tests
 
 ```bash
 uv sync --dev
 uv run pytest                 # unit tests (mocked network)
-uv run pytest -m live         # optional live smoke against the public API (station 12345)
+uv run pytest -m live         # optional live smoke (station 12345)
 ```
 
-## API references
+## Contributing & license
 
-- GraphQL: https://app.birdweather.com/graphql
-- Schema docs: https://app.birdweather.com/api/index.html
-- Station REST (token): `https://app.birdweather.com/api/v1/stations/<token>/...`
-
-## License
-
-MIT
+- [CONTRIBUTING.md](CONTRIBUTING.md) · [CHANGELOG.md](CHANGELOG.md) · [SECURITY.md](SECURITY.md)
+- API refs: [GraphQL](https://app.birdweather.com/graphql) · [schema docs](https://app.birdweather.com/api/index.html) · Station REST: `/api/v1/stations/<token>/...`
+- Licensed under [MIT](LICENSE)
