@@ -6,11 +6,15 @@
 #   # MCP endpoint: http://127.0.0.1:8000/mcp
 #
 # Optional station token (never commit the real value):
-#   export BIRDWEATHER_STATION_TOKEN=your_token
-#   # or create a local .env (gitignored) with BIRDWEATHER_STATION_TOKEN=...
+#   Put BIRDWEATHER_STATION_TOKEN in a mode-600 .env and uncomment env_file below.
+#   Do not inline the token in this file.
 #
-# arm64 (e.g. Synology DS223j): build on the NAS, or:
-#   docker buildx build --platform linux/arm64 -t birdweather-mcp:local --load .
+# Host headers (MagicDNS / LAN hostname → avoid 421 Invalid Host header):
+#   MCP_ALLOWED_HOSTS=nas.example.local:*
+#   MCP_ALLOWED_HOSTS=*   # trusted networks only
+#
+# arm64 (e.g. Synology DS223j): prefer buildx off-NAS, export a .tar, import in
+# Container Manager — see docs/self-hosting.md.
 
 services:
   birdweather-mcp:
@@ -20,13 +24,17 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:8000:8000"
+    # Prefer a mode-600 .env (see docs/self-hosting.md). Compose also reads .env
+    # next to this file for ${BIRDWEATHER_STATION_TOKEN} interpolation.
+    # env_file:
+    #   - .env
     environment:
       MCP_TRANSPORT: streamable-http
       MCP_HOST: "0.0.0.0"
       MCP_PORT: "8000"
       # Optional — enables station REST API. Never logged by the server.
       BIRDWEATHER_STATION_TOKEN: ${BIRDWEATHER_STATION_TOKEN:-}
-    # env_file: .env
+      # Optional: MCP_ALLOWED_HOSTS=nas.example.local:*
     healthcheck:
       test:
         [

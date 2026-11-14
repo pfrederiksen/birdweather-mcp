@@ -25,7 +25,7 @@ This server is designed so that:
 
 - Prefer env vars or your MCP client's secret store — never hard-code the token in a committed file.
 - Keep `.env` out of git (already listed in `.gitignore`). Use `.env.example` as a template.
-- For Docker / Synology: inject the token via Container Manager secrets / compose `environment` / a host-only `.env`, not a baked image layer.
+- For Docker / Synology: inject the token via a mode-`600` `env_file` / host-only `.env` (never inline in compose), not a baked image layer.
 - If you suspect a token was exposed, rotate it in the BirdWeather app and update your env.
 
 ## Network exposure
@@ -36,6 +36,7 @@ The default transport is **stdio** (no open port). If you run **streamable-http*
 - The compose file maps `127.0.0.1:8000:8000` by design.
 - Put a reverse proxy with authentication in front if untrusted clients must reach the MCP endpoint.
 - This server does **not** implement its own API keys or OAuth.
+- Host-header allowlisting (`MCP_ALLOWED_HOSTS`) defaults to loopback. Set explicit hostnames (or `*` only on trusted networks) when clients use LAN/MagicDNS names; see [docs/self-hosting.md](docs/self-hosting.md).
 
 See [docs/self-hosting.md](docs/self-hosting.md) for LAN / Tailscale / Synology hardening notes.
 

@@ -9,10 +9,19 @@ import os
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from birdweather_mcp.client import BirdWeatherClient, BirdWeatherError
 
 logger = logging.getLogger("birdweather_mcp")
+
+# FastMCP defaults — keep when MCP_ALLOWED_HOSTS is unset.
+_DEFAULT_ALLOWED_HOSTS = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+_DEFAULT_ALLOWED_ORIGINS = [
+    "http://127.0.0.1:*",
+    "http://localhost:*",
+    "http://[::1]:*",
+]
 
 mcp = FastMCP(
     "birdweather",
@@ -24,6 +33,62 @@ mcp = FastMCP(
         "(see app.birdweather.com/stations/<id>)."
     ),
 )
+
+
+def parse_allowed_hosts(raw: str | None) -> list[str] | None:
+    """Parse ``MCP_ALLOWED_HOSTS``.
+
+    Returns:
+      - ``None`` if unset/empty (caller should keep FastMCP defaults)
+      - ``[]`` when ``*`` (disable DNS rebinding protection / allow any host)
+      - otherwise a list of Host header patterns (comma-separated)
+    """
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    if text == "*":
+        return []
+    hosts = [part.strip() for part in text.split(",") if part.strip()]
+    return hosts or None
+
+
+def transport_security_from_env(
+    raw_hosts: str | None = None,
+) -> TransportSecuritySettings | None:
+    """Build transport security settings from ``MCP_ALLOWED_HOSTS``.
+
+    - Unset: return ``None`` (leave FastMCP defaults alone).
+    - ``*``: disable DNS rebinding protection (trusted networks only).
+    - Comma-separated hosts: enable protection with those hosts plus loopback
+      defaults. Patterns like ``hostname:*`` allow any port. Matching
+      ``http(s)://…`` origin patterns are derived automatically.
+    """
+    if raw_hosts is None:
+        raw_hosts = os.environ.get("MCP_ALLOWED_HOSTS")
+    parsed = parse_allowed_hosts(raw_hosts)
+    if parsed is None:
+        return None
+    if parsed == []:
+        return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+    hosts = list(dict.fromkeys([*_DEFAULT_ALLOWED_HOSTS, *parsed]))
+    origins = list(_DEFAULT_ALLOWED_ORIGINS)
+    for host in parsed:
+        if host.endswith(":*"):
+            base = host[:-2]
+            origins.append(f"http://{base}:*")
+            origins.append(f"https://{base}:*")
+        else:
+            origins.append(f"http://{host}")
+            origins.append(f"https://{host}")
+    origins = list(dict.fromkeys(origins))
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=hosts,
+        allowed_origins=origins,
+    )
 
 
 def _client() -> BirdWeatherClient:
@@ -303,6 +368,20 @@ def main() -> None:
 
     mcp.settings.host = args.host
     mcp.settings.port = args.port
+    security = transport_security_from_env()
+    if security is not None:
+        mcp.settings.transport_security = security
+        if not security.enable_dns_rebinding_protection:
+            logger.info(
+                "DNS rebinding protection disabled (MCP_ALLOWED_HOSTS=*); "
+                "use only on trusted networks"
+            )
+        else:
+            logger.info(
+                "Allowed Host headers: %s",
+                ", ".join(security.allowed_hosts),
+            )
+
     mcp.run(transport=args.transport)
 
 
