@@ -117,6 +117,74 @@ async def health_check(_request: Request) -> Response:
     return JSONResponse({"status": "ok", "version": __version__})
 
 
+@mcp.prompt()
+def daily_station_summary(station_id: str = "12345") -> str:
+    """Prompt: summarize today's activity at a station."""
+    return (
+        f"Using birdweather-mcp tools, summarize today's bird activity at station "
+        f"{station_id}. Call get_station, station_counts (days=1), top_species "
+        f"(days=1, limit=10), and recent_detections (days=1, limit=10). "
+        f"Mention timezone, top species, notable high-confidence detections, and "
+        f"any soundscape/audio URLs. Use placeholder-friendly wording if data is sparse."
+    )
+
+
+@mcp.prompt()
+def weekly_report(station_id: str = "12345") -> str:
+    """Prompt: weekly detection report for a station."""
+    return (
+        f"Produce a weekly report for BirdWeather station {station_id}. "
+        f"Use station_counts (days=7), top_species (days=7, limit=15), "
+        f"daily_counts (days=7, include_species_breakdown=false), and "
+        f"activity_by_hour (days=7). Summarize totals, busiest days/hours, "
+        f"dominant species, and any new_arrivals for the current year."
+    )
+
+
+@mcp.prompt()
+def species_deep_dive(station_id: str = "12345", species: str = "House Finch") -> str:
+    """Prompt: deep-dive one species at a station."""
+    return (
+        f"Deep-dive on {species} at station {station_id}. "
+        f"Call species_info (query={species!r}), species_trend "
+        f"(days=30, granularity=day), recent_detections (days=7, species={species!r}, "
+        f"limit=10), and activity_by_hour (days=7, species={species!r}). "
+        f"Explain trend shape, typical hours, and link audio/soundscape URLs when present."
+    )
+
+
+@mcp.resource(
+    "birdweather://station/{station_id}",
+    name="station_info",
+    title="Station info",
+    description="JSON station metadata for a BirdWeather station id.",
+    mime_type="application/json",
+)
+def station_info_resource(station_id: str) -> str:
+    """Resource: station metadata JSON."""
+    try:
+        with _client() as client:
+            return _ok(client.get_station(station_id))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.resource(
+    "birdweather://station/{station_id}/species",
+    name="station_species_list",
+    title="Station species list",
+    description="JSON top species for the last 7 days at a station.",
+    mime_type="application/json",
+)
+def station_species_list_resource(station_id: str) -> str:
+    """Resource: recent species list JSON (7-day window)."""
+    try:
+        with _client() as client:
+            return _ok(client.top_species(station_id, days=7, limit=50))
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
 @mcp.tool()
 def get_station(station_id: str) -> str:
     """Get station metadata: name, location, coords, timezone, detection range, thresholds.
