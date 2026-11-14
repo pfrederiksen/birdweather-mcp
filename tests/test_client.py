@@ -47,9 +47,9 @@ def test_build_period_from_to():
 
 
 def test_bbox_from_point():
-    ne, sw = bbox_from_point(40.0, -105.0, 10)
-    assert sw["lat"] < 40.0 < ne["lat"]
-    assert sw["lon"] < -105.0 < ne["lon"]
+    ne, sw = bbox_from_point(37.77, -122.42, 10)
+    assert sw["lat"] < 37.77 < ne["lat"]
+    assert sw["lon"] < -122.42 < ne["lon"]
 
 
 @respx.mock
@@ -63,7 +63,7 @@ def test_get_station(client: BirdWeatherClient):
                         "id": "12345",
                         "name": "example",
                         "timezone": "America/Los_Angeles",
-                        "coords": {"lat": 40.0, "lon": -105.0},
+                        "coords": {"lat": 37.77, "lon": -122.42},
                     }
                 }
             },
@@ -206,7 +206,7 @@ def test_search_stations_with_distance(client: BirdWeatherClient):
                             {
                                 "id": "12345",
                                 "name": "example",
-                                "coords": {"lat": 40.0, "lon": -105.0},
+                                "coords": {"lat": 37.77, "lon": -122.42},
                             }
                         ],
                     }
@@ -214,7 +214,7 @@ def test_search_stations_with_distance(client: BirdWeatherClient):
             },
         )
     )
-    out = client.search_stations(lat=40.0, lon=-105.0, radius_km=20)
+    out = client.search_stations(lat=37.77, lon=-122.42, radius_km=20)
     assert out["stations"][0]["id"] == "12345"
     assert "distance_km" in out["stations"][0]
 

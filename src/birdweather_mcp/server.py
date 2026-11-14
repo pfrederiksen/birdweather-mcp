@@ -21,7 +21,7 @@ mcp = FastMCP(
         "species info, and nearby stations. Public GraphQL needs no auth. "
         "Set BIRDWEATHER_STATION_TOKEN for richer station REST data. "
         "Use IANA timezones (e.g. America/Los_Angeles). Station IDs are numeric "
-        "(example for docs/tests only: 12345)."
+        "(see app.birdweather.com/stations/<id>)."
     ),
 )
 
