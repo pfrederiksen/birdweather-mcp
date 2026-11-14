@@ -5,6 +5,20 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] — 2026-11-14
+
+### Fixed
+
+- `daily_counts` now aggregates detections into station-local calendar days (GraphQL `dailyDetectionCounts` buckets by UTC and can return an extra day when `from == to`). Rows outside the requested range are omitted; quiet days are included with `total: 0`.
+
+### Added
+
+- `MCP_ALLOWED_HOSTS` for streamable-HTTP Host-header allowlisting (comma-separated, or `*` on trusted networks) to avoid `421 Invalid Host header` when clients use LAN/MagicDNS names.
+
+### Changed
+
+- Synology self-hosting docs: off-NAS `linux/arm64` buildx + image import, `env_file` for tokens, LAN bind + MagicDNS, Container Manager / error 2202 notes, free-port and folder-layout examples.
+
 ## [0.1.0] — 2026-11-14
 
 ### Added
@@ -16,4 +30,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docs: README, self-hosting guide, tool reference with live samples, contributing, security policy.
 - Pytest suite with mocked unit tests and optional `@pytest.mark.live` smoke (set `BIRDWEATHER_TEST_STATION_ID`).
 
+[0.1.1]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.1.1
 [0.1.0]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.1.0
