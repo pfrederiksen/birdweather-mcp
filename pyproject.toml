@@ -1,6 +1,6 @@
 [project]
 name = "birdweather-mcp"
-version = "0.2.3"
+version = "0.2.4"
 description = "Self-hostable MCP server for BirdWeather stations (detections, species, stats)."
 readme = "README.md"
 license = "MIT"

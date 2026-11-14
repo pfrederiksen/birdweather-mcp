@@ -22,7 +22,7 @@ logger = logging.getLogger("birdweather_mcp")
 
 GRAPHQL_URL = "https://app.birdweather.com/graphql"
 REST_BASE = "https://app.birdweather.com/api/v1/stations/"
-USER_AGENT = "birdweather-mcp/0.2.3 (+https://github.com/pfrederiksen/birdweather-mcp)"
+USER_AGENT = "birdweather-mcp/0.2.4 (+https://github.com/pfrederiksen/birdweather-mcp)"
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 100
 DEFAULT_MAX_RETRIES = 5
