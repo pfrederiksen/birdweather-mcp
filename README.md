@@ -7,6 +7,7 @@
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python 3.11+" /></a>
+  <a href="https://pypi.org/project/birdweather-mcp/"><img src="https://img.shields.io/pypi/v/birdweather-mcp" alt="PyPI" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-compatible-green.svg" alt="MCP compatible" /></a>
   <a href="docs/self-hosting.md"><img src="https://img.shields.io/badge/docker-ready-2496ED.svg" alt="Docker ready" /></a>
 </p>
@@ -34,6 +35,14 @@ Works out of the box against the **public GraphQL API** — no account required.
 uvx birdweather-mcp
 ```
 
+**pip / pipx:**
+
+```bash
+pip install birdweather-mcp
+# or: pipx install birdweather-mcp
+birdweather-mcp
+```
+
 **Homebrew:**
 
 ```bash
@@ -57,7 +66,7 @@ Configure Claude Desktop / Cursor / VS Code → [Clients](docs/clients.md).
 | Guide | Description |
 |-------|-------------|
 | [docs/README.md](docs/README.md) | Index of all guides |
-| [Installation](docs/installation.md) | uvx, pip, Homebrew, Docker/GHCR, from source |
+| [Installation](docs/installation.md) | uvx, pip, pipx, Homebrew, Docker/GHCR, from source |
 | [Configuration](docs/configuration.md) | Environment variables, station ID/token |
 | [Clients](docs/clients.md) | Claude Desktop, Cursor, Claude Code, VS Code, HTTP |
 | [Tools](docs/tools.md) | Tools, prompts, and resources |

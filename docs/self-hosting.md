@@ -4,7 +4,7 @@ Run birdweather-mcp as a **long-lived streamable-HTTP** service so MCP clients o
 
 > **Security first:** bind to loopback, LAN, or Tailscale only. Do **not** publish port 8000 to the public internet without an authenticated reverse proxy. See [SECURITY.md](../SECURITY.md).
 
-For install options (uvx, Homebrew, pip), see [installation.md](installation.md). Env reference: [configuration.md](configuration.md).
+For install options (uvx, pip, pipx, Homebrew), see [installation.md](installation.md). Env reference: [configuration.md](configuration.md).
 
 ## Quick start (Docker Compose)
 

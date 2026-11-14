@@ -4,13 +4,13 @@ Pick one path below. For MCP client wiring after install, see [clients.md](clien
 
 ## uvx (recommended for desktop clients)
 
-No clone required. After the package is on PyPI:
+No clone required:
 
 ```bash
 uvx birdweather-mcp
 ```
 
-From git until / if you prefer the latest commit:
+From git if you prefer the latest commit:
 
 ```bash
 uvx --from git+https://github.com/pfrederiksen/birdweather-mcp birdweather-mcp
@@ -28,6 +28,13 @@ From a local checkout:
 
 ```bash
 pip install .
+birdweather-mcp
+```
+
+## pipx
+
+```bash
+pipx install birdweather-mcp
 birdweather-mcp
 ```
 

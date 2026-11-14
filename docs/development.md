@@ -80,7 +80,7 @@ docker-compose.yml
 3. **Commit** on `main` (or a short-lived release branch merged to `main`).
 4. **Tag** `vX.Y.Z` and push the tag (maintainers only). That triggers:
    - **GHCR** (`.github/workflows/docker-publish.yml`): multi-arch `linux/amd64` + `linux/arm64` image `ghcr.io/pfrederiksen/birdweather-mcp` tagged with semver (`X.Y.Z`, `X.Y`) plus `latest` / SHA on `main`.
-   - **PyPI** (`.github/workflows/publish-pypi.yml`): `uv build` + trusted publishing (configure the publisher on pypi.org; no API token secret in the workflow).
+   - **PyPI** (`.github/workflows/publish-pypi.yml`): `uv build` + trusted publishing is configured and runs on `vX.Y.Z` tags (no API token secret in the workflow).
 5. **Homebrew tap** — update the formula in `pfrederiksen/homebrew-tap` (version, URL/sha256 for the release tarball or PyPI sdist) so `brew install pfrederiksen/tap/birdweather-mcp` tracks the new release.
 
 Do not publish tags from documentation-only dry runs unless you intend to ship.

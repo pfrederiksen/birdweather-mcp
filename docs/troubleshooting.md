@@ -31,4 +31,4 @@ Open your station on [app.birdweather.com](https://app.birdweather.com); the URL
 Not recommended without auth. Prefer Tailscale / LAN bind. Details in [SECURITY.md](../SECURITY.md) and [self-hosting.md](self-hosting.md).
 
 **Which install method should I use?**  
-Desktop clients: [uvx or Homebrew](installation.md). Always-on NAS: [Docker/GHCR](self-hosting.md).
+Desktop clients: [uvx, pipx, or Homebrew](installation.md). Always-on NAS: [Docker/GHCR](self-hosting.md).

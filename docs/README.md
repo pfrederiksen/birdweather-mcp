@@ -4,7 +4,7 @@ Guides for installing, configuring, and running [birdweather-mcp](../README.md).
 
 | Guide | Description |
 |-------|-------------|
-| [Installation](installation.md) | uvx, pip, Homebrew, Docker/GHCR, from source |
+| [Installation](installation.md) | uvx, pip, pipx, Homebrew, Docker/GHCR, from source |
 | [Configuration](configuration.md) | Environment variables, defaults, station ID/token |
 | [Clients](clients.md) | Claude Desktop, Cursor, Claude Code, VS Code, HTTP |
 | [Tools](tools.md) | MCP tools, prompts, and resources |

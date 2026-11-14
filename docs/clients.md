@@ -138,4 +138,4 @@ If `MCP_AUTH_TOKEN` is set on the server, send a bearer header (exact client sup
 
 ## Registry metadata
 
-[`server.json`](../server.json) describes this server for the official MCP registry (PyPI + GHCR package entries). Publishing to the registry is a separate step after PyPI/GHCR packages exist.
+[`server.json`](../server.json) describes this server for the official MCP registry (PyPI + GHCR package entries). Publishing to the registry is a separate step from package releases.
