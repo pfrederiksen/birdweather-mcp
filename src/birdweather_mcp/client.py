@@ -6,9 +6,11 @@ import logging
 import math
 import os
 import random
+import re
 import time
 from datetime import date, datetime, timedelta
 from typing import Any, Self
+from urllib.parse import quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
@@ -20,12 +22,19 @@ logger = logging.getLogger("birdweather_mcp")
 
 GRAPHQL_URL = "https://app.birdweather.com/graphql"
 REST_BASE = "https://app.birdweather.com/api/v1/stations/"
-USER_AGENT = "birdweather-mcp/0.2 (+https://github.com/pfrederiksen/birdweather-mcp)"
+USER_AGENT = "birdweather-mcp/0.2.2 (+https://github.com/pfrederiksen/birdweather-mcp)"
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 100
 DEFAULT_MAX_RETRIES = 5
 RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 MAX_DETECTION_PAGES = 50  # cap upstream paging for aggregate helpers
+MAX_STATION_ID_LEN = 32
+MAX_DAYS = 366
+MAX_SPECIES_QUERY_LEN = 100
+STATION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+ALLOWED_REST_PATHS = frozenset({"stats", "detections"})
+ALLOWED_REST_PERIODS = frozenset({"all", "day", "week", "month", "year"})
+ALLOWED_GRANULARITY = frozenset({"day", "week"})
 
 
 class BirdWeatherError(Exception):
@@ -33,9 +42,65 @@ class BirdWeatherError(Exception):
 
 
 def _redact(message: str, token: str | None) -> str:
+    """Replace raw and URL-encoded token forms in ``message``."""
     if not token:
         return message
-    return message.replace(token, "<token>")
+    out = message.replace(token, "<token>")
+    # Cover both default quote() and quote(..., safe="") encodings.
+    for encoded in {quote(token), quote(token, safe="")}:
+        if encoded and encoded != token:
+            out = out.replace(encoded, "<token>")
+    return out
+
+
+def secrets_from_env() -> list[str]:
+    """Station + MCP auth tokens currently present in the environment."""
+    secrets: list[str] = []
+    for key in ("BIRDWEATHER_STATION_TOKEN", "MCP_AUTH_TOKEN"):
+        raw = os.environ.get(key)
+        if raw is None:
+            continue
+        token = raw.strip()
+        if token:
+            secrets.append(token)
+    return secrets
+
+
+def redact_secrets(message: str, *extra_tokens: str | None) -> str:
+    """Redact known secrets (env tokens plus any extras) from a string."""
+    out = message
+    for token in secrets_from_env():
+        out = _redact(out, token)
+    for token in extra_tokens:
+        out = _redact(out, token)
+    return out
+
+
+def validate_station_id(station_id: str | int) -> str:
+    """Validate a station id (non-empty, max 32, ``^[A-Za-z0-9_-]+$``)."""
+    text = str(station_id).strip()
+    if not text:
+        raise BirdWeatherError("station_id must not be empty")
+    if len(text) > MAX_STATION_ID_LEN:
+        raise BirdWeatherError(
+            f"station_id must be at most {MAX_STATION_ID_LEN} characters"
+        )
+    if not STATION_ID_RE.fullmatch(text):
+        raise BirdWeatherError(
+            "station_id must match ^[A-Za-z0-9_-]+$ (letters, digits, _, -)"
+        )
+    return text
+
+
+def validate_species_query(query: str) -> str:
+    text = query.strip()
+    if not text:
+        raise BirdWeatherError("query must not be empty")
+    if len(text) > MAX_SPECIES_QUERY_LEN:
+        raise BirdWeatherError(
+            f"query must be at most {MAX_SPECIES_QUERY_LEN} characters"
+        )
+    return text
 
 
 def _parse_date(value: str | date) -> date:
@@ -74,6 +139,8 @@ def build_period(
     if days is not None:
         if days < 1:
             raise BirdWeatherError("days must be >= 1")
+        if days > MAX_DAYS:
+            raise BirdWeatherError(f"days must be <= {MAX_DAYS}")
         if from_date or to_date:
             raise BirdWeatherError("Pass either days or from_date/to_date, not both.")
         end = datetime.now(ZoneInfo(tz)).date()
@@ -102,6 +169,12 @@ def build_period(
     assert start is not None and end is not None
     if end < start:
         raise BirdWeatherError("to_date must be on or after from_date")
+    # Inclusive day count: Jan 1–Jan 1 is 1 day; max allowed is MAX_DAYS.
+    inclusive_days = (end - start).days + 1
+    if inclusive_days > MAX_DAYS:
+        raise BirdWeatherError(
+            f"date range must not exceed {MAX_DAYS} days (got {inclusive_days})"
+        )
     return {"from": start.isoformat(), "to": end.isoformat(), "timezone": tz}
 
 
@@ -458,16 +531,26 @@ class BirdWeatherClient:
             raise BirdWeatherError(
                 "BIRDWEATHER_STATION_TOKEN is not set; REST endpoints are unavailable."
             )
-        params = params or {}
+        # Path segments must be allowlisted constants (never caller-controlled).
+        segment = path.lstrip("/")
+        if segment not in ALLOWED_REST_PATHS:
+            raise BirdWeatherError(f"Invalid REST path '{path}'")
+        params = dict(params or {})
+        if "period" in params:
+            period = str(params["period"])
+            if period not in ALLOWED_REST_PERIODS:
+                raise BirdWeatherError(
+                    f"period must be one of {sorted(ALLOWED_REST_PERIODS)}"
+                )
         # Cache key includes a token fingerprint, never the raw token.
         token_fp = make_cache_key("token", self._token)[:16]
-        cache_key = make_cache_key("rest", token_fp, path, params)
+        cache_key = make_cache_key("rest", token_fp, segment, params)
         cached = self._cache_get(cache_key)
         if cached is not None:
             return cached
 
         # Never put the raw token into log messages.
-        url = f"{REST_BASE}{self._token}/{path.lstrip('/')}"
+        url = f"{REST_BASE}{self._token}/{segment}"
 
         def do_request() -> httpx.Response:
             return self._http.get(url, params=params)
@@ -482,10 +565,11 @@ class BirdWeatherClient:
         return data
 
     def get_station(self, station_id: str | int) -> dict[str, Any]:
-        data = self.graphql(queries.STATION, {"id": str(station_id)})
+        sid = validate_station_id(station_id)
+        data = self.graphql(queries.STATION, {"id": sid})
         station = data.get("station")
         if not station:
-            raise BirdWeatherError(f"Station {station_id} not found")
+            raise BirdWeatherError(f"Station {sid} not found")
         result: dict[str, Any] = {"station": station, "source": "graphql"}
         if self._token:
             try:
@@ -501,13 +585,14 @@ class BirdWeatherClient:
         return result
 
     def get_station_timezone(self, station_id: str | int) -> str:
+        sid = validate_station_id(station_id)
         data = self.graphql(
-            "query($id: ID!){ station(id:$id){ timezone } }",
-            {"id": str(station_id)},
+            queries.STATION_TIMEZONE,
+            {"id": sid},
         )
         station = data.get("station")
         if not station:
-            raise BirdWeatherError(f"Station {station_id} not found")
+            raise BirdWeatherError(f"Station {sid} not found")
         return resolve_timezone(station.get("timezone") or "UTC")
 
     def station_counts(
@@ -519,24 +604,26 @@ class BirdWeatherClient:
         days: int | None = None,
         timezone: str | None = None,
     ) -> dict[str, Any]:
-        tz = timezone or self.get_station_timezone(station_id)
+        sid = validate_station_id(station_id)
+        tz = timezone or self.get_station_timezone(sid)
         period = build_period(
             from_date=from_date, to_date=to_date, days=days, timezone=tz
         )
         data = self.graphql(
             queries.STATION_COUNTS,
-            {"id": str(station_id), "period": period},
+            {"id": sid, "period": period},
         )
         station = data.get("station")
         if not station:
-            raise BirdWeatherError(f"Station {station_id} not found")
+            raise BirdWeatherError(f"Station {sid} not found")
         return {"station": station, "period": period, "source": "graphql"}
 
     def get_weather(self, station_id: str | int) -> dict[str, Any]:
-        data = self.graphql(queries.STATION_WEATHER, {"id": str(station_id)})
+        sid = validate_station_id(station_id)
+        data = self.graphql(queries.STATION_WEATHER, {"id": sid})
         station = data.get("station")
         if not station:
-            raise BirdWeatherError(f"Station {station_id} not found")
+            raise BirdWeatherError(f"Station {sid} not found")
         return {"station": station, "source": "graphql"}
 
     def resolve_species_id(
@@ -547,6 +634,7 @@ class BirdWeatherClient:
         text = str(species).strip()
         if text.isdigit():
             return text
+        text = validate_species_query(text)
         # Treat as common or scientific name search; prefer exact common/scientific match.
         results = self.search_species(text, limit=10)
         nodes = results.get("species") or []
@@ -574,8 +662,9 @@ class BirdWeatherClient:
         after: str | None = None,
         use_rest: bool | None = None,
     ) -> dict[str, Any]:
+        sid = validate_station_id(station_id)
         limit = max(1, min(int(limit), MAX_PAGE_SIZE))
-        tz = timezone or self.get_station_timezone(station_id)
+        tz = timezone or self.get_station_timezone(sid)
         period = build_period(
             from_date=from_date, to_date=to_date, days=days, timezone=tz
         )
@@ -592,7 +681,7 @@ class BirdWeatherClient:
 
         species_id = self.resolve_species_id(species)
         variables: dict[str, Any] = {
-            "id": str(station_id),
+            "id": sid,
             "first": limit,
             "after": after,
             "period": period,
@@ -605,7 +694,7 @@ class BirdWeatherClient:
         data = self.graphql(queries.DETECTIONS, variables)
         station = data.get("station")
         if not station:
-            raise BirdWeatherError(f"Station {station_id} not found")
+            raise BirdWeatherError(f"Station {sid} not found")
         det = station.get("detections") or {}
         nodes = [enrich_detection_media(n) for n in (det.get("nodes") or [])]
         return {
@@ -681,15 +770,16 @@ class BirdWeatherClient:
         offset: int = 0,
         species: str | int | None = None,
     ) -> dict[str, Any]:
+        sid = validate_station_id(station_id)
         limit = max(1, min(int(limit), 100))
         offset = max(0, int(offset))
-        tz = timezone or self.get_station_timezone(station_id)
+        tz = timezone or self.get_station_timezone(sid)
         period = build_period(
             from_date=from_date, to_date=to_date, days=days, timezone=tz
         )
         species_id = self.resolve_species_id(species)
         variables: dict[str, Any] = {
-            "id": str(station_id),
+            "id": sid,
             "limit": limit,
             "offset": offset,
             "period": period,
@@ -699,7 +789,7 @@ class BirdWeatherClient:
         data = self.graphql(queries.TOP_SPECIES, variables)
         station = data.get("station")
         if not station:
-            raise BirdWeatherError(f"Station {station_id} not found")
+            raise BirdWeatherError(f"Station {sid} not found")
         return {
             "station": {
                 "id": station.get("id"),
@@ -728,13 +818,14 @@ class BirdWeatherClient:
         trusting GraphQL ``dailyDetectionCounts`` (UTC-bucketed, can overshoot
         the requested range).
         """
-        tz = timezone or self.get_station_timezone(station_id)
+        sid = validate_station_id(station_id)
+        tz = timezone or self.get_station_timezone(sid)
         period = build_period(
             from_date=from_date, to_date=to_date, days=days, timezone=tz
         )
         species_id = self.resolve_species_id(species)
         detections = self._iter_detections(
-            station_id, period=period, species_id=species_id
+            sid, period=period, species_id=species_id
         )
         rows = aggregate_daily_counts(
             detections,
@@ -742,7 +833,7 @@ class BirdWeatherClient:
             include_species_breakdown=include_species_breakdown,
         )
         return {
-            "station_id": str(station_id),
+            "station_id": sid,
             "period": period,
             "days": rows,
             "source": "graphql",
@@ -758,12 +849,13 @@ class BirdWeatherClient:
         sort_by: str = "timestampDesc",
     ) -> list[dict[str, Any]]:
         """Fetch detections in a period (paginated, capped)."""
+        sid = validate_station_id(station_id)
         nodes: list[dict[str, Any]] = []
         after: str | None = None
         pages = max(1, int(max_pages))
         for _ in range(pages):
             variables: dict[str, Any] = {
-                "id": str(station_id),
+                "id": sid,
                 "first": MAX_PAGE_SIZE,
                 "after": after,
                 "period": period,
@@ -774,7 +866,7 @@ class BirdWeatherClient:
             data = self.graphql(queries.DETECTIONS, variables)
             station = data.get("station")
             if not station:
-                raise BirdWeatherError(f"Station {station_id} not found")
+                raise BirdWeatherError(f"Station {sid} not found")
             det = station.get("detections") or {}
             batch = det.get("nodes") or []
             nodes.extend(batch)
@@ -816,12 +908,11 @@ class BirdWeatherClient:
         return {"species": species, "source": "graphql"}
 
     def search_species(self, query: str, *, limit: int = 20, after: str | None = None) -> dict[str, Any]:
-        if not query or not query.strip():
-            raise BirdWeatherError("query must not be empty")
+        q = validate_species_query(query if query is not None else "")
         limit = max(1, min(int(limit), MAX_PAGE_SIZE))
         data = self.graphql(
             queries.SEARCH_SPECIES,
-            {"query": query.strip(), "first": limit, "after": after},
+            {"query": q, "first": limit, "after": after},
         )
         conn = data.get("searchSpecies") or {}
         return {
@@ -884,14 +975,15 @@ class BirdWeatherClient:
         granularity: str = "day",
     ) -> dict[str, Any]:
         """Counts over time for one species in station-local time."""
+        sid = validate_station_id(station_id)
         gran = (granularity or "day").strip().lower()
-        if gran not in {"day", "week"}:
+        if gran not in ALLOWED_GRANULARITY:
             raise BirdWeatherError("granularity must be 'day' or 'week'")
         species_id = self.resolve_species_id(species)
         if not species_id:
             raise BirdWeatherError("species is required")
         daily = self.daily_counts(
-            station_id,
+            sid,
             from_date=from_date,
             to_date=to_date,
             days=None if (from_date or to_date) else days,
@@ -908,7 +1000,7 @@ class BirdWeatherClient:
         )
         info = self.species_info(species_id=species_id)
         return {
-            "station_id": str(station_id),
+            "station_id": sid,
             "species": info.get("species"),
             "period": daily["period"],
             "granularity": gran,
@@ -923,10 +1015,11 @@ class BirdWeatherClient:
         period: dict[str, Any],
         species_id: str,
     ) -> dict[str, Any] | None:
+        sid = validate_station_id(station_id)
         data = self.graphql(
             queries.DETECTIONS,
             {
-                "id": str(station_id),
+                "id": sid,
                 "first": 1,
                 "after": None,
                 "period": period,
@@ -936,7 +1029,7 @@ class BirdWeatherClient:
         )
         station = data.get("station")
         if not station:
-            raise BirdWeatherError(f"Station {station_id} not found")
+            raise BirdWeatherError(f"Station {sid} not found")
         nodes = (station.get("detections") or {}).get("nodes") or []
         return nodes[0] if nodes else None
 
@@ -956,7 +1049,8 @@ class BirdWeatherClient:
         of the season). For each candidate (capped by ``limit``), the earliest
         detection in the season is fetched — one cached GraphQL call per species.
         """
-        tz = timezone or self.get_station_timezone(station_id)
+        station = validate_station_id(station_id)
+        tz = timezone or self.get_station_timezone(station)
         tz_name = resolve_timezone(tz)
         now_local = datetime.now(ZoneInfo(tz_name)).date()
         if since:
@@ -987,7 +1081,7 @@ class BirdWeatherClient:
             "timezone": tz_name,
         }
         candidates = self.top_species(
-            station_id,
+            station,
             from_date=arrival_start.isoformat(),
             to_date=arrival_end.isoformat(),
             timezone=tz_name,
@@ -999,7 +1093,7 @@ class BirdWeatherClient:
             if not sid:
                 continue
             earliest = self._earliest_detection(
-                station_id, period=season, species_id=sid
+                station, period=season, species_id=sid
             )
             if not earliest or not earliest.get("timestamp"):
                 continue
@@ -1026,7 +1120,7 @@ class BirdWeatherClient:
             )
         arrivals.sort(key=lambda r: r["first_detected_on"])
         return {
-            "station_id": str(station_id),
+            "station_id": station,
             "year": y,
             "season": season,
             "arrival_window": arrival_period,
@@ -1068,6 +1162,8 @@ class BirdWeatherClient:
         limit: int = 100,
     ) -> dict[str, Any]:
         """Species overlap and differences between two stations for a period."""
+        validate_station_id(station_a)
+        validate_station_id(station_b)
         limit = max(1, min(int(limit), 100))
         a = self.top_species(
             station_a,
@@ -1146,7 +1242,8 @@ class BirdWeatherClient:
         max_pages: int = 20,
     ) -> dict[str, Any]:
         """Hourly detection histogram in station-local time."""
-        tz = timezone or self.get_station_timezone(station_id)
+        sid = validate_station_id(station_id)
+        tz = timezone or self.get_station_timezone(sid)
         period = build_period(
             from_date=from_date,
             to_date=to_date,
@@ -1155,14 +1252,14 @@ class BirdWeatherClient:
         )
         species_id = self.resolve_species_id(species)
         detections = self._iter_detections(
-            station_id,
+            sid,
             period=period,
             species_id=species_id,
             max_pages=max_pages,
         )
         hours = aggregate_hourly_counts(detections, period=period)
         return {
-            "station_id": str(station_id),
+            "station_id": sid,
             "period": period,
             "species_id": species_id,
             "hours": hours,

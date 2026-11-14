@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import logging
 import os
@@ -15,9 +16,74 @@ from starlette.responses import JSONResponse, Response
 
 from birdweather_mcp import __version__
 from birdweather_mcp.auth import auth_token_from_env, wrap_app_with_optional_auth
-from birdweather_mcp.client import BirdWeatherClient, BirdWeatherError
+from birdweather_mcp.client import (
+    BirdWeatherClient,
+    BirdWeatherError,
+    redact_secrets,
+    validate_station_id,
+)
 
 logger = logging.getLogger("birdweather_mcp")
+
+
+class TokenRedactFilter(logging.Filter):
+    """Redact station and MCP auth tokens from log records (raw + URL-encoded)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:  # noqa: BLE001
+            return True
+        redacted = redact_secrets(message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = ()
+        return True
+
+
+def install_token_redact_filter() -> None:
+    """Install a redacting filter on the root logger and its current handlers."""
+    filt = TokenRedactFilter()
+    root = logging.getLogger()
+    root.addFilter(filt)
+    for handler in root.handlers:
+        handler.addFilter(filt)
+
+
+def is_loopback_host(host: str) -> bool:
+    """Return True when ``host`` is clearly loopback-only."""
+    text = (host or "").strip().lower()
+    if not text:
+        return False
+    if text in {"localhost", "127.0.0.1", "::1", "[::1]"}:
+        return True
+    # Strip brackets used for IPv6 literals.
+    candidate = text[1:-1] if text.startswith("[") and text.endswith("]") else text
+    try:
+        return ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        return False
+
+
+def warn_insecure_http_defaults(*, host: str, transport: str) -> None:
+    """Log prominent warnings for risky HTTP defaults (do not refuse to start)."""
+    if transport not in {"streamable-http", "sse"}:
+        return
+    token = auth_token_from_env()
+    if not token and not is_loopback_host(host):
+        logger.warning(
+            "SECURITY: HTTP transport bound to non-loopback host %r without "
+            "MCP_AUTH_TOKEN. Set MCP_AUTH_TOKEN so /mcp requires "
+            "Authorization: Bearer <token> ( /health stays public).",
+            host,
+        )
+    allowed = (os.environ.get("MCP_ALLOWED_HOSTS") or "").strip()
+    if allowed == "*" and not token:
+        logger.warning(
+            "SECURITY: MCP_ALLOWED_HOSTS=* with no MCP_AUTH_TOKEN disables "
+            "DNS rebinding protection and leaves /mcp unauthenticated. "
+            "Set MCP_AUTH_TOKEN on trusted networks."
+        )
 
 # FastMCP defaults — keep when MCP_ALLOWED_HOSTS is unset.
 _DEFAULT_ALLOWED_HOSTS = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
@@ -106,9 +172,11 @@ def _ok(payload: dict[str, Any]) -> str:
 
 def _err(exc: Exception) -> str:
     if isinstance(exc, BirdWeatherError):
-        return json.dumps({"error": str(exc)}, indent=2)
-    logger.exception("Unexpected error")
-    return json.dumps({"error": f"{type(exc).__name__}: {exc}"}, indent=2)
+        return json.dumps({"error": redact_secrets(str(exc))}, indent=2)
+    # Never log a traceback that might embed a token-bearing URL; redact instead.
+    safe = redact_secrets(f"{type(exc).__name__}: {exc}")
+    logger.error("Unexpected error: %s", safe)
+    return json.dumps({"error": safe}, indent=2)
 
 
 @mcp.custom_route("/health", methods=["GET"])
@@ -120,9 +188,10 @@ async def health_check(_request: Request) -> Response:
 @mcp.prompt()
 def daily_station_summary(station_id: str = "12345") -> str:
     """Prompt: summarize today's activity at a station."""
+    sid = validate_station_id(station_id)
     return (
         f"Using birdweather-mcp tools, summarize today's bird activity at station "
-        f"{station_id}. Call get_station, station_counts (days=1), top_species "
+        f"{sid}. Call get_station, station_counts (days=1), top_species "
         f"(days=1, limit=10), and recent_detections (days=1, limit=10). "
         f"Mention timezone, top species, notable high-confidence detections, and "
         f"any soundscape/audio URLs. Use placeholder-friendly wording if data is sparse."
@@ -132,8 +201,9 @@ def daily_station_summary(station_id: str = "12345") -> str:
 @mcp.prompt()
 def weekly_report(station_id: str = "12345") -> str:
     """Prompt: weekly detection report for a station."""
+    sid = validate_station_id(station_id)
     return (
-        f"Produce a weekly report for BirdWeather station {station_id}. "
+        f"Produce a weekly report for BirdWeather station {sid}. "
         f"Use station_counts (days=7), top_species (days=7, limit=15), "
         f"daily_counts (days=7, include_species_breakdown=false), and "
         f"activity_by_hour (days=7). Summarize totals, busiest days/hours, "
@@ -144,8 +214,9 @@ def weekly_report(station_id: str = "12345") -> str:
 @mcp.prompt()
 def species_deep_dive(station_id: str = "12345", species: str = "House Finch") -> str:
     """Prompt: deep-dive one species at a station."""
+    sid = validate_station_id(station_id)
     return (
-        f"Deep-dive on {species} at station {station_id}. "
+        f"Deep-dive on {species} at station {sid}. "
         f"Call species_info (query={species!r}), species_trend "
         f"(days=30, granularity=day), recent_detections (days=7, species={species!r}, "
         f"limit=10), and activity_by_hour (days=7, species={species!r}). "
@@ -163,8 +234,9 @@ def species_deep_dive(station_id: str = "12345", species: str = "House Finch") -
 def station_info_resource(station_id: str) -> str:
     """Resource: station metadata JSON."""
     try:
+        sid = validate_station_id(station_id)
         with _client() as client:
-            return _ok(client.get_station(station_id))
+            return _ok(client.get_station(sid))
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 
@@ -179,8 +251,9 @@ def station_info_resource(station_id: str) -> str:
 def station_species_list_resource(station_id: str) -> str:
     """Resource: recent species list JSON (7-day window)."""
     try:
+        sid = validate_station_id(station_id)
         with _client() as client:
-            return _ok(client.top_species(station_id, days=7, limit=50))
+            return _ok(client.top_species(sid, days=7, limit=50))
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 
@@ -192,8 +265,9 @@ def get_station(station_id: str) -> str:
     If BIRDWEATHER_STATION_TOKEN is set, also includes all-time REST stats.
     """
     try:
+        sid = validate_station_id(station_id)
         with _client() as client:
-            return _ok(client.get_station(station_id))
+            return _ok(client.get_station(sid))
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 
@@ -212,10 +286,11 @@ def station_counts(
     Timezone defaults to the station's timezone.
     """
     try:
+        sid = validate_station_id(station_id)
         with _client() as client:
             return _ok(
                 client.station_counts(
-                    station_id,
+                    sid,
                     from_date=from_date,
                     to_date=to_date,
                     days=None if (from_date or to_date) else days,
@@ -230,8 +305,9 @@ def station_counts(
 def get_weather(station_id: str) -> str:
     """Current weather reading for a station, when BirdWeather has one."""
     try:
+        sid = validate_station_id(station_id)
         with _client() as client:
-            return _ok(client.get_weather(station_id))
+            return _ok(client.get_weather(sid))
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
 
@@ -256,10 +332,11 @@ def recent_detections(
     the station REST API is preferred (extra fields like image URLs).
     """
     try:
+        sid = validate_station_id(station_id)
         with _client() as client:
             return _ok(
                 client.recent_detections(
-                    station_id,
+                    sid,
                     from_date=from_date,
                     to_date=to_date,
                     days=None if (from_date or to_date) else days,
@@ -286,10 +363,11 @@ def top_species(
 ) -> str:
     """Top species by detection count for a station and period (species_list)."""
     try:
+        sid = validate_station_id(station_id)
         with _client() as client:
             return _ok(
                 client.top_species(
-                    station_id,
+                    sid,
                     from_date=from_date,
                     to_date=to_date,
                     days=None if (from_date or to_date) else days,
@@ -336,10 +414,11 @@ def daily_counts(
 ) -> str:
     """Per-day detection totals (and optional per-species breakdown) for a station."""
     try:
+        sid = validate_station_id(station_id)
         with _client() as client:
             return _ok(
                 client.daily_counts(
-                    station_id,
+                    sid,
                     from_date=from_date,
                     to_date=to_date,
                     days=None if (from_date or to_date) else days,
@@ -426,10 +505,11 @@ def species_trend(
 ) -> str:
     """Counts over time for one species at a station (station-local days or weeks)."""
     try:
+        sid = validate_station_id(station_id)
         with _client() as client:
             return _ok(
                 client.species_trend(
-                    station_id,
+                    sid,
                     species,
                     from_date=from_date,
                     to_date=to_date,
@@ -456,10 +536,11 @@ def first_of_year(
     Default arrival window is the last 14 days of the season (Jan 1–today, or since/until).
     """
     try:
+        sid = validate_station_id(station_id)
         with _client() as client:
             return _ok(
                 client.first_of_year(
-                    station_id,
+                    sid,
                     year=year,
                     since=since,
                     until=until,
@@ -503,11 +584,13 @@ def compare_stations(
 ) -> str:
     """Compare species lists for two stations over the same period (overlap and uniques)."""
     try:
+        a = validate_station_id(station_a)
+        b = validate_station_id(station_b)
         with _client() as client:
             return _ok(
                 client.compare_stations(
-                    station_a,
-                    station_b,
+                    a,
+                    b,
                     from_date=from_date,
                     to_date=to_date,
                     days=None if (from_date or to_date) else days,
@@ -530,10 +613,11 @@ def activity_by_hour(
 ) -> str:
     """Hourly detection histogram in station-local time (optional species filter)."""
     try:
+        sid = validate_station_id(station_id)
         with _client() as client:
             return _ok(
                 client.activity_by_hour(
-                    station_id,
+                    sid,
                     from_date=from_date,
                     to_date=to_date,
                     days=None if (from_date or to_date) else days,
@@ -593,6 +677,10 @@ def main() -> None:
         level=logging.INFO,
         format="%(levelname)s %(name)s: %(message)s",
     )
+    # Avoid httpx/httpcore INFO request-URL logs (REST embeds the station token).
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    install_token_redact_filter()
     # Never log env token values.
     if os.environ.get("BIRDWEATHER_STATION_TOKEN"):
         logger.info("Station REST API enabled (token present, not logged)")
@@ -613,6 +701,7 @@ def main() -> None:
                 ", ".join(security.allowed_hosts),
             )
 
+    warn_insecure_http_defaults(host=args.host, transport=args.transport)
     _install_optional_http_auth()
     mcp.run(transport=args.transport)
 

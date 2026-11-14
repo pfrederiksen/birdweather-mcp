@@ -28,6 +28,14 @@ query Station($id: ID!) {
 }
 """
 
+STATION_TIMEZONE = """
+query StationTimezone($id: ID!) {
+  station(id: $id) {
+    timezone
+  }
+}
+"""
+
 STATION_COUNTS = """
 query StationCounts($id: ID!, $period: InputDuration) {
   station(id: $id) {
