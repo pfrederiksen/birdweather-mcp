@@ -10,7 +10,10 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from starlette.requests import Request
+from starlette.responses import JSONResponse, Response
 
+from birdweather_mcp import __version__
 from birdweather_mcp.client import BirdWeatherClient, BirdWeatherError
 
 logger = logging.getLogger("birdweather_mcp")
@@ -104,6 +107,12 @@ def _err(exc: Exception) -> str:
         return json.dumps({"error": str(exc)}, indent=2)
     logger.exception("Unexpected error")
     return json.dumps({"error": f"{type(exc).__name__}: {exc}"}, indent=2)
+
+
+@mcp.custom_route("/health", methods=["GET"])
+async def health_check(_request: Request) -> Response:
+    """Cheap liveness probe for streamable-HTTP (no upstream BirdWeather call)."""
+    return JSONResponse({"status": "ok", "version": __version__})
 
 
 @mcp.tool()

@@ -200,8 +200,12 @@ Exact key names vary slightly by client version — prefer `url` / `type: "http"
 | `MCP_HOST` | No | Bind host for HTTP transports (default `127.0.0.1`) |
 | `MCP_PORT` | No | Bind port for HTTP transports (default `8000`) |
 | `MCP_ALLOWED_HOSTS` | No | Comma-separated Host headers for HTTP (e.g. `nas.example.local:*`). Unset = loopback only. `*` = allow any host on trusted networks. Fixes `421 Invalid Host header` for MagicDNS/LAN names. |
+| `BIRDWEATHER_CACHE_TTL` | No | In-memory upstream cache TTL in seconds (default `60`). Set `0` to disable. |
+| `BIRDWEATHER_CACHE_MAX_ENTRIES` | No | Max cached responses (default `256`). |
+| `BIRDWEATHER_CACHE_ENABLED` | No | Set `false`/`0` to disable caching. |
+| `BIRDWEATHER_MAX_RETRIES` | No | Retries with backoff+jitter on 429/5xx/timeouts (default `5`). |
 
-See `.env.example` for a local template.
+See `.env.example` for a local template. Streamable-HTTP also serves `GET /health` (no upstream call) for container healthchecks.
 
 ## Tools
 

@@ -21,8 +21,11 @@ uv run birdweather-mcp
 # HTTP for local debugging
 uv run birdweather-mcp --transport streamable-http --host 127.0.0.1 --port 8000
 
-# unit tests (mocked network — default)
-uv run pytest
+# unit tests (mocked network — default; CI uses -m "not live")
+uv run pytest -m "not live"
+
+# lint
+uv run ruff check src tests
 
 # optional live smoke against public GraphQL
 # Set BIRDWEATHER_TEST_STATION_ID to a public station id; tests skip if unset.

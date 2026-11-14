@@ -5,22 +5,27 @@ from __future__ import annotations
 import logging
 import math
 import os
+import random
 import time
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import httpx
 
 from birdweather_mcp import queries
+from birdweather_mcp.cache import TTLCache, make_cache_key
 
 logger = logging.getLogger("birdweather_mcp")
 
 GRAPHQL_URL = "https://app.birdweather.com/graphql"
 REST_BASE = "https://app.birdweather.com/api/v1/stations/"
-USER_AGENT = "birdweather-mcp/0.1 (+https://github.com/pfrederiksen/birdweather-mcp)"
+USER_AGENT = "birdweather-mcp/0.2 (+https://github.com/pfrederiksen/birdweather-mcp)"
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 100
+DEFAULT_MAX_RETRIES = 5
+RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+MAX_DETECTION_PAGES = 50  # cap upstream paging for aggregate helpers
 
 
 class BirdWeatherError(Exception):
@@ -200,6 +205,32 @@ def bbox_from_point(lat: float, lon: float, radius_km: float) -> tuple[dict, dic
     return ne, sw
 
 
+def _max_retries_from_env(default: int = DEFAULT_MAX_RETRIES) -> int:
+    raw = os.environ.get("BIRDWEATHER_MAX_RETRIES")
+    if raw is None or not str(raw).strip():
+        return default
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return default
+
+
+def _backoff_seconds(attempt: int, *, base: float = 0.5, cap: float = 30.0) -> float:
+    """Exponential backoff with full jitter (AWS-style)."""
+    exp = min(cap, base * (2**attempt))
+    return random.uniform(0, exp)
+
+
+def _is_retryable_http_error(exc: BaseException) -> bool:
+    if isinstance(exc, httpx.TimeoutException):
+        return True
+    if isinstance(exc, (httpx.ConnectError, httpx.ReadError, httpx.WriteError)):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code in RETRYABLE_STATUS
+    return False
+
+
 class BirdWeatherClient:
     """Thin client over GraphQL (always) and station REST (optional token)."""
 
@@ -208,23 +239,33 @@ class BirdWeatherClient:
         *,
         station_token: str | None = None,
         timeout: float = 60.0,
-        max_retries: int = 5,
+        max_retries: int | None = None,
         client: httpx.Client | None = None,
+        cache: TTLCache | None = None,
+        use_cache: bool | None = None,
     ) -> None:
         self._token = station_token or os.environ.get("BIRDWEATHER_STATION_TOKEN") or None
         self._timeout = timeout
-        self._max_retries = max_retries
+        self._max_retries = (
+            max_retries if max_retries is not None else _max_retries_from_env()
+        )
         self._owns_client = client is None
         self._http = client or httpx.Client(
             timeout=timeout,
             headers={"user-agent": USER_AGENT},
         )
+        if use_cache is False:
+            self._cache: TTLCache | None = None
+        elif cache is not None:
+            self._cache = cache
+        else:
+            self._cache = TTLCache.from_env()
 
     def close(self) -> None:
         if self._owns_client:
             self._http.close()
 
-    def __enter__(self) -> BirdWeatherClient:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -234,77 +275,125 @@ class BirdWeatherClient:
     def has_station_token(self) -> bool:
         return bool(self._token)
 
-    def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
-        payload = {"query": query, "variables": variables or {}}
+    @property
+    def cache(self) -> TTLCache | None:
+        return self._cache
+
+    def _cache_get(self, key: str) -> Any | None:
+        if self._cache is None:
+            return None
+        return self._cache.get(key)
+
+    def _cache_set(self, key: str, value: Any) -> None:
+        if self._cache is None:
+            return
+        self._cache.set(key, value)
+
+    def _request_with_retries(
+        self,
+        *,
+        label: str,
+        do_request: Any,
+    ) -> httpx.Response:
         last_error: Exception | None = None
         for attempt in range(self._max_retries):
             try:
-                resp = self._http.post(
-                    GRAPHQL_URL,
-                    json=payload,
-                    headers={"content-type": "application/json"},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                if data.get("errors"):
-                    msgs = "; ".join(
-                        e.get("message", str(e)) for e in data["errors"]
+                resp: httpx.Response = do_request()
+                if resp.status_code in RETRYABLE_STATUS:
+                    wait = _backoff_seconds(attempt)
+                    logger.warning(
+                        "%s HTTP %s (attempt %s/%s), retrying in %.2fs",
+                        label,
+                        resp.status_code,
+                        attempt + 1,
+                        self._max_retries,
+                        wait,
                     )
-                    raise BirdWeatherError(f"GraphQL error: {msgs}")
-                if "data" not in data:
-                    raise BirdWeatherError("GraphQL response missing data")
-                return data["data"]
+                    if attempt + 1 >= self._max_retries:
+                        resp.raise_for_status()
+                    time.sleep(wait)
+                    continue
+                resp.raise_for_status()
+                return resp
             except BirdWeatherError:
                 raise
-            except Exception as exc:  # noqa: BLE001 — retry network/HTTP failures
+            except Exception as exc:
                 last_error = exc
-                wait = min(30, 2**attempt)
+                if not _is_retryable_http_error(exc):
+                    raise BirdWeatherError(
+                        f"{label} request failed: {_redact(str(exc), self._token)}"
+                    ) from exc
+                wait = _backoff_seconds(attempt)
                 logger.warning(
-                    "GraphQL request failed (attempt %s/%s), retrying in %ss: %s",
+                    "%s request failed (attempt %s/%s), retrying in %.2fs: %s",
+                    label,
                     attempt + 1,
                     self._max_retries,
                     wait,
                     _redact(str(exc), self._token),
                 )
+                if attempt + 1 >= self._max_retries:
+                    break
                 time.sleep(wait)
         raise BirdWeatherError(
-            f"GraphQL request failed after retries: {_redact(str(last_error), self._token)}"
+            f"{label} request failed after retries: "
+            f"{_redact(str(last_error), self._token)}"
         )
+
+    def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+        variables = variables or {}
+        cache_key = make_cache_key("graphql", query, variables)
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+
+        payload = {"query": query, "variables": variables}
+
+        def do_request() -> httpx.Response:
+            return self._http.post(
+                GRAPHQL_URL,
+                json=payload,
+                headers={"content-type": "application/json"},
+            )
+
+        resp = self._request_with_retries(label="GraphQL", do_request=do_request)
+        data = resp.json()
+        if data.get("errors"):
+            msgs = "; ".join(e.get("message", str(e)) for e in data["errors"])
+            raise BirdWeatherError(f"GraphQL error: {msgs}")
+        if "data" not in data:
+            raise BirdWeatherError("GraphQL response missing data")
+        result = data["data"]
+        self._cache_set(cache_key, result)
+        return result
 
     def rest_get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self._token:
             raise BirdWeatherError(
                 "BIRDWEATHER_STATION_TOKEN is not set; REST endpoints are unavailable."
             )
+        params = params or {}
+        # Cache key includes a token fingerprint, never the raw token.
+        token_fp = make_cache_key("token", self._token)[:16]
+        cache_key = make_cache_key("rest", token_fp, path, params)
+        cached = self._cache_get(cache_key)
+        if cached is not None:
+            return cached
+
         # Never put the raw token into log messages.
         url = f"{REST_BASE}{self._token}/{path.lstrip('/')}"
-        last_error: Exception | None = None
-        for attempt in range(self._max_retries):
-            try:
-                resp = self._http.get(url, params=params or {})
-                resp.raise_for_status()
-                data = resp.json()
-                if data.get("success") is False:
-                    raise BirdWeatherError(
-                        f"REST error: {data.get('message') or 'success=false'}"
-                    )
-                return data
-            except BirdWeatherError:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
-                wait = min(30, 2**attempt)
-                logger.warning(
-                    "REST request failed (attempt %s/%s), retrying in %ss: %s",
-                    attempt + 1,
-                    self._max_retries,
-                    wait,
-                    _redact(str(exc), self._token),
-                )
-                time.sleep(wait)
-        raise BirdWeatherError(
-            f"REST request failed after retries: {_redact(str(last_error), self._token)}"
-        )
+
+        def do_request() -> httpx.Response:
+            return self._http.get(url, params=params)
+
+        resp = self._request_with_retries(label="REST", do_request=do_request)
+        data = resp.json()
+        if data.get("success") is False:
+            raise BirdWeatherError(
+                f"REST error: {data.get('message') or 'success=false'}"
+            )
+        self._cache_set(cache_key, data)
+        return data
 
     def get_station(self, station_id: str | int) -> dict[str, Any]:
         data = self.graphql(queries.STATION, {"id": str(station_id)})
@@ -578,11 +667,13 @@ class BirdWeatherClient:
         *,
         period: dict[str, Any],
         species_id: str | None = None,
+        max_pages: int = MAX_DETECTION_PAGES,
     ) -> list[dict[str, Any]]:
-        """Fetch all detections in a period (paginated)."""
+        """Fetch detections in a period (paginated, capped)."""
         nodes: list[dict[str, Any]] = []
         after: str | None = None
-        while True:
+        pages = max(1, int(max_pages))
+        for _ in range(pages):
             variables: dict[str, Any] = {
                 "id": str(station_id),
                 "first": MAX_PAGE_SIZE,
