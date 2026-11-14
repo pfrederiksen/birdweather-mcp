@@ -5,6 +5,18 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] — 2026-11-14
+
+### Security
+
+- Compare HTTP bearer tokens with `hmac.compare_digest`; reject websocket scopes when `MCP_AUTH_TOKEN` is set; keep only exact `/health` public.
+- Raise `httpx`/`httpcore` loggers to WARNING; install a root logging filter that redacts station and MCP auth tokens (raw and URL-encoded); harden `_redact` and `_err` so unexpected errors never leak token-bearing URLs or tracebacks.
+- Warn at startup when HTTP binds a non-loopback host (or `MCP_ALLOWED_HOSTS=*`) without `MCP_AUTH_TOKEN` (still starts for compatibility).
+- Validate `station_id`, date windows (max 366 days), species query length, granularity/period enums, and allowlisted REST path segments; keep GraphQL values in variables.
+- Run the container as non-root (`USER app`, uid 10001); add `.dockerignore`; tighten compose with `read_only`, `cap_drop: ALL`, `no-new-privileges`, and `/tmp` tmpfs.
+- Pin GitHub Actions to full commit SHAs, set `permissions: contents: read`, `persist-credentials: false` on checkout, and add Dependabot for Actions/pip/Docker.
+- Expand `SECURITY.md` reporting policy, response expectations, and an HTTP hardening checklist; update configuration and self-hosting docs.
+
 ## [0.2.1] — 2026-11-14
 
 ### Changed
@@ -78,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docs: README, self-hosting guide, tool reference with live samples, contributing, security policy.
 - Pytest suite with mocked unit tests and optional `@pytest.mark.live` smoke (set `BIRDWEATHER_TEST_STATION_ID`).
 
+[0.2.2]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.2.2
 [0.2.1]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.2.1
 [0.2.0]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.2.0
 [0.1.4]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.1.4

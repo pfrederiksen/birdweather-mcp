@@ -8,13 +8,13 @@
     "url": "https://github.com/pfrederiksen/birdweather-mcp",
     "source": "github"
   },
-  "version": "0.2.1",
+  "version": "0.2.2",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "birdweather-mcp",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
@@ -30,7 +30,7 @@
     },
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/pfrederiksen/birdweather-mcp:0.2.1",
+      "identifier": "ghcr.io/pfrederiksen/birdweather-mcp:0.2.2",
       "transport": {
         "type": "stdio"
       },
