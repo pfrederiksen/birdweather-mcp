@@ -122,7 +122,7 @@ Detections with time window, optional species filter, min confidence, limit, and
 | `limit` | int | no | `25` | max 100 |
 | `after` | string | no | | previous `page_info.endCursor` |
 
-With a station token, REST is preferred (`"source": "rest"`) and payloads may include extra fields (e.g. image URLs).
+With a station token, REST is preferred (`"source": "rest"`) and payloads may include extra fields (e.g. image URLs). Detections are enriched with `audio_url` (from `soundscape.url`), species image/thumbnail URLs when present, and `spectrogram_url` when the API provides a spectrogram field.
 
 ```json
 {
@@ -158,7 +158,10 @@ With a station token, REST is preferred (`"source": "rest"`) and payloads may in
         "endTime": 3.0,
         "duration": 9,
         "mode": "live"
-      }
+      },
+      "audio_url": "https://media.birdweather.com/soundscapes/12345/12345-20261114-151829.flac",
+      "species_image_url": "https://media.birdweather.com/species/134/HouseFinch-standard-example.jpg",
+      "species_thumbnail_url": "https://media.birdweather.com/species/134/HouseFinch-thumbnail-example.jpg"
     }
   ],
   "total_count": 3171087,
@@ -335,6 +338,158 @@ Search the catalog by common or scientific name fragment.
     "hasNextPage": true,
     "endCursor": "Mg"
   },
+  "source": "graphql"
+}
+```
+
+---
+
+## `species_trend`
+
+Per-day or per-week detection counts for one species in station-local time.
+
+| Param | Type | Required | Default | Notes |
+|-------|------|----------|---------|-------|
+| `station_id` | string | yes | | |
+| `species` | string | yes | | id, common, or scientific name |
+| `days` | int | no | `30` | |
+| `from_date` / `to_date` | string | no | | |
+| `timezone` | string | no | station TZ | |
+| `granularity` | string | no | `day` | `day` or `week` |
+
+```json
+{
+  "station_id": "12345",
+  "species": {
+    "id": "134",
+    "commonName": "House Finch",
+    "scientificName": "Haemorhous mexicanus"
+  },
+  "period": {
+    "from": "2026-11-01",
+    "to": "2026-11-14",
+    "timezone": "America/Los_Angeles"
+  },
+  "granularity": "day",
+  "series": [
+    { "date": "2026-11-01", "total": 12 },
+    { "date": "2026-11-02", "total": 8 }
+  ],
+  "source": "graphql"
+}
+```
+
+---
+
+## `first_of_year` / `new_arrivals`
+
+Species whose **first** detection in the season (calendar year or `since` date) falls in the arrival window (default: last 14 days of the season through `until` / today). `new_arrivals` is an alias.
+
+| Param | Type | Required | Default | Notes |
+|-------|------|----------|---------|-------|
+| `station_id` | string | yes | | |
+| `year` | int | no | current local year | Ignored if `since` set |
+| `since` / `until` | string | no | Jan 1 / today | Season bounds `YYYY-MM-DD` |
+| `timezone` | string | no | station TZ | |
+| `limit` | int | no | `50` | Cap on candidates from the arrival window |
+
+Uses cached GraphQL calls (top species in the window + one earliest-detection lookup per candidate).
+
+```json
+{
+  "station_id": "12345",
+  "year": 2026,
+  "season": {
+    "from": "2026-01-01",
+    "to": "2026-11-14",
+    "timezone": "America/Los_Angeles"
+  },
+  "arrival_window": {
+    "from": "2026-11-01",
+    "to": "2026-11-14",
+    "timezone": "America/Los_Angeles"
+  },
+  "species": [
+    {
+      "speciesId": "75",
+      "species": {
+        "id": "75",
+        "commonName": "Common Raven",
+        "scientificName": "Corvus corax"
+      },
+      "first_detected_on": "2026-11-10",
+      "audio_url": "https://media.birdweather.com/soundscapes/example.flac"
+    }
+  ],
+  "candidates_checked": 20,
+  "source": "graphql"
+}
+```
+
+---
+
+## `compare_stations`
+
+Species overlap and differences for two stations over the same period (via `top_species`, limit capped).
+
+| Param | Type | Required | Default |
+|-------|------|----------|---------|
+| `station_a` / `station_b` | string | yes | |
+| `days` | int | no | `7` |
+| `from_date` / `to_date` | string | no | |
+| `timezone` | string | no | station A TZ |
+| `limit` | int | no | `100` |
+
+```json
+{
+  "period": {
+    "from": "2026-11-08",
+    "to": "2026-11-14",
+    "timezone": "America/Los_Angeles"
+  },
+  "station_a": { "id": "12345", "name": "Example Station" },
+  "station_b": { "id": "67890", "name": "Nearby Example Pi" },
+  "overlap": [
+    {
+      "speciesId": "134",
+      "station_a": { "speciesId": "134", "count": 273, "commonName": "House Finch" },
+      "station_b": { "speciesId": "134", "count": 40, "commonName": "House Finch" }
+    }
+  ],
+  "only_station_a": [],
+  "only_station_b": [],
+  "summary": { "shared": 1, "only_a": 0, "only_b": 0, "limit": 100 },
+  "source": "graphql"
+}
+```
+
+---
+
+## `activity_by_hour`
+
+Hourly histogram (0–23) in station-local time. Detection paging is capped to limit upstream load.
+
+| Param | Type | Required | Default |
+|-------|------|----------|---------|
+| `station_id` | string | yes | |
+| `days` | int | no | `7` |
+| `from_date` / `to_date` | string | no | |
+| `timezone` | string | no | station TZ |
+| `species` | string | no | filter |
+
+```json
+{
+  "station_id": "12345",
+  "period": {
+    "from": "2026-11-08",
+    "to": "2026-11-14",
+    "timezone": "America/Los_Angeles"
+  },
+  "hours": [
+    { "hour": 0, "count": 2 },
+    { "hour": 7, "count": 40 }
+  ],
+  "total": 497,
   "source": "graphql"
 }
 ```

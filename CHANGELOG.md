@@ -5,6 +5,13 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] — 2026-11-14
+
+### Added
+
+- Tools: `species_trend`, `first_of_year` / `new_arrivals`, `compare_stations`, `activity_by_hour` (with unit tests and docs/tools.md entries).
+- Detection payloads include `audio_url`, species image/thumbnail URLs, and `spectrogram_url` when the API provides them.
+
 ## [0.1.3] — 2026-11-14
 
 ### Added
@@ -52,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docs: README, self-hosting guide, tool reference with live samples, contributing, security policy.
 - Pytest suite with mocked unit tests and optional `@pytest.mark.live` smoke (set `BIRDWEATHER_TEST_STATION_ID`).
 
+[0.1.4]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.1.4
 [0.1.3]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.1.3
 [0.1.2]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.1.2
 [0.1.1]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.1.1

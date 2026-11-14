@@ -23,7 +23,7 @@ BirdWeather already records rich detection data. This server makes that data **t
 
 ## Features
 
-- **10 MCP tools** — station info, counts, weather, detections, top species, daily series, species search/profiles, nearby stations
+- **15 MCP tools** — station info, counts, weather, detections, top species, daily series, species trends, new arrivals, station compare, hourly activity, species search/profiles, nearby stations
 - **No auth required** for public GraphQL; optional `BIRDWEATHER_STATION_TOKEN` for REST
 - **stdio** (Claude Desktop / Cursor) or **streamable-HTTP** (Docker / Synology / Tailscale)
 - **Period helpers** — `days=N` or `from_date`/`to_date` in the station’s timezone
@@ -165,6 +165,10 @@ Full parameter lists and **sample JSON** (placeholders — use your own station 
 | `species_info` | `species_id` / `scientific_name` / `query` | “Tell me about Haemorhous mexicanus.” |
 | `search_species` | `query`, `limit`, `after` | “Search the catalog for ‘raven’.” |
 | `search_stations` | `lat`, `lon`, `radius_km`, `query` | “Find stations within 20 km of 37.77, −122.42.” |
+| `species_trend` | `station_id`, `species`, `days`, `granularity` | “House Finch trend at 12345 for the last 30 days.” |
+| `first_of_year` / `new_arrivals` | `station_id`, `year` / `since` | “What new species arrived at 12345 recently?” |
+| `compare_stations` | `station_a`, `station_b`, `days` | “Compare species at 12345 vs 67890 this week.” |
+| `activity_by_hour` | `station_id`, `days`, `species` | “When is station 12345 busiest during the day?” |
 
 ### Period defaults
 

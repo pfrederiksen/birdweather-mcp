@@ -114,6 +114,11 @@ def test_mcp_registers_expected_tools():
         "species_info",
         "search_species",
         "search_stations",
+        "species_trend",
+        "first_of_year",
+        "new_arrivals",
+        "compare_stations",
+        "activity_by_hour",
     }
     assert expected.issubset(names)
 
