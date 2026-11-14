@@ -85,7 +85,8 @@ def warn_insecure_http_defaults(*, host: str, transport: str) -> None:
             "Set MCP_AUTH_TOKEN on trusted networks."
         )
 
-# MCPServer / SDK defaults — keep when MCP_ALLOWED_HOSTS is unset.
+# Loopback Host/Origin patterns applied when MCP_ALLOWED_HOSTS is unset/empty
+# (and merged when a comma-separated allowlist is set).
 _DEFAULT_ALLOWED_HOSTS = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
 _DEFAULT_ALLOWED_ORIGINS = [
     "http://127.0.0.1:*",
@@ -111,7 +112,7 @@ def parse_allowed_hosts(raw: str | None) -> list[str] | None:
     """Parse ``MCP_ALLOWED_HOSTS``.
 
     Returns:
-      - ``None`` if unset/empty (caller should keep SDK loopback defaults)
+      - ``None`` if unset/empty (caller applies explicit loopback defaults)
       - ``[]`` when ``*`` (disable DNS rebinding protection / allow any host)
       - otherwise a list of Host header patterns (comma-separated)
     """
@@ -128,10 +129,13 @@ def parse_allowed_hosts(raw: str | None) -> list[str] | None:
 
 def transport_security_from_env(
     raw_hosts: str | None = None,
-) -> TransportSecuritySettings | None:
+) -> TransportSecuritySettings:
     """Build transport security settings from ``MCP_ALLOWED_HOSTS``.
 
-    - Unset: return ``None`` (leave SDK loopback defaults alone).
+    - Unset/empty: enable DNS rebinding protection with loopback-only
+      ``allowed_hosts`` / ``allowed_origins`` (same as SDK localhost defaults).
+      Explicit settings are required so protection stays on when binding
+      ``0.0.0.0`` — the SDK only auto-enables for loopback ``host``.
     - ``*``: disable DNS rebinding protection (trusted networks only).
     - Comma-separated hosts: enable protection with those hosts plus loopback
       defaults. Patterns like ``hostname:*`` allow any port. Matching
@@ -141,7 +145,11 @@ def transport_security_from_env(
         raw_hosts = os.environ.get("MCP_ALLOWED_HOSTS")
     parsed = parse_allowed_hosts(raw_hosts)
     if parsed is None:
-        return None
+        return TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=list(_DEFAULT_ALLOWED_HOSTS),
+            allowed_origins=list(_DEFAULT_ALLOWED_ORIGINS),
+        )
     if parsed == []:
         return TransportSecuritySettings(enable_dns_rebinding_protection=False)
 
@@ -688,25 +696,24 @@ def main() -> None:
         logger.info("Station REST API enabled (token present, not logged)")
 
     security = transport_security_from_env()
-    if security is not None:
-        if not security.enable_dns_rebinding_protection:
-            logger.info(
-                "DNS rebinding protection disabled (MCP_ALLOWED_HOSTS=*); "
-                "use only on trusted networks"
-            )
-        else:
-            logger.info(
-                "Allowed Host headers: %s",
-                ", ".join(security.allowed_hosts),
-            )
+    if not security.enable_dns_rebinding_protection:
+        logger.info(
+            "DNS rebinding protection disabled (MCP_ALLOWED_HOSTS=*); "
+            "use only on trusted networks"
+        )
+    else:
+        logger.info(
+            "Allowed Host headers: %s",
+            ", ".join(security.allowed_hosts),
+        )
 
     warn_insecure_http_defaults(host=args.host, transport=args.transport)
     _install_optional_http_auth()
     if args.transport == "stdio":
         mcp.run(transport="stdio")
     else:
-        # host must reach streamable_http_app/sse_app so DNS-rebinding
-        # auto-enable (loopback only) matches bind address, including 0.0.0.0.
+        # Always pass explicit transport_security so DNS-rebinding protection
+        # stays enabled when binding 0.0.0.0 (SDK auto-enable is loopback-only).
         mcp.run(
             transport=args.transport,
             host=args.host,

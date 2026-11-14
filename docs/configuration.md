@@ -10,7 +10,7 @@ All settings are environment variables (or CLI flags that mirror the transport t
 | `MCP_TRANSPORT` | No | `stdio` | `stdio`, `streamable-http`, or `sse`. Overridable with `--transport`. |
 | `MCP_HOST` | No | `127.0.0.1` | Bind host for HTTP transports. Overridable with `--host`. Inside Docker use `0.0.0.0` and restrict with host port publish (prefer `127.0.0.1` or LAN-only on the host). Non-loopback bind without `MCP_AUTH_TOKEN` logs a SECURITY warning. |
 | `MCP_PORT` | No | `8000` | Bind port for HTTP transports. Overridable with `--port`. |
-| `MCP_ALLOWED_HOSTS` | No | unset (loopback only) | Comma-separated Host header patterns for streamable-HTTP DNS-rebinding protection (e.g. `nas.example.local:*,192.168.1.10:*`). Unset = FastMCP loopback defaults. `*` = allow any host (**trusted networks only**; warns if `MCP_AUTH_TOKEN` is unset). Fixes `421 Invalid Host header` for MagicDNS/LAN names. |
+| `MCP_ALLOWED_HOSTS` | No | unset (loopback only) | Comma-separated Host header patterns for streamable-HTTP DNS-rebinding protection (e.g. `nas.example.local:*,192.168.1.10:*`). Unset = MCPServer (MCP Python SDK 2.x) loopback defaults (protection stays on even when binding `0.0.0.0`). `*` = allow any host (**trusted networks only**; warns if `MCP_AUTH_TOKEN` is unset). Fixes `421 Invalid Host header` for MagicDNS/LAN names. |
 | `MCP_AUTH_TOKEN` | No | unset | When set, HTTP `/mcp` requires `Authorization: Bearer …` (constant-time compare). Exact `/health` stays open; websockets are rejected. Strongly recommended for non-loopback HTTP. Never logged. |
 | `BIRDWEATHER_CACHE_TTL` | No | `60` | In-memory upstream cache TTL in seconds. Set `0` to disable. |
 | `BIRDWEATHER_CACHE_MAX_ENTRIES` | No | `256` | Max cached GraphQL/REST responses. |

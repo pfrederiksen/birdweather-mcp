@@ -105,7 +105,7 @@ Streamable-HTTP uses MCP DNS-rebinding protection. By default only `localhost` /
 
 | `MCP_ALLOWED_HOSTS` | Effect |
 |---------------------|--------|
-| *(unset)* | FastMCP defaults (loopback only) |
+| *(unset)* | MCPServer (MCP Python SDK 2.x) loopback defaults (protection on) |
 | `nas.example.local:*,192.168.1.10:*` | Allow those Host values (any port with `:*`); loopback remains allowed |
 | `*` | Disable DNS rebinding protection — **trusted networks only** |
 
