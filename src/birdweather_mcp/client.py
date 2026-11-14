@@ -105,8 +105,8 @@ def build_period(
     return {"from": start.isoformat(), "to": end.isoformat(), "timezone": tz}
 
 
-def detection_local_date(timestamp: str, timezone: str) -> date:
-    """Calendar date of a detection timestamp in the given IANA timezone."""
+def detection_local_datetime(timestamp: str, timezone: str) -> datetime:
+    """Timezone-aware datetime of a detection in the given IANA timezone."""
     text = str(timestamp).strip()
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
@@ -116,7 +116,93 @@ def detection_local_date(timestamp: str, timezone: str) -> date:
         raise BirdWeatherError(f"Invalid detection timestamp '{timestamp}'") from exc
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=ZoneInfo("UTC"))
-    return dt.astimezone(ZoneInfo(resolve_timezone(timezone))).date()
+    return dt.astimezone(ZoneInfo(resolve_timezone(timezone)))
+
+
+def detection_local_date(timestamp: str, timezone: str) -> date:
+    """Calendar date of a detection timestamp in the given IANA timezone."""
+    return detection_local_datetime(timestamp, timezone).date()
+
+
+def enrich_detection_media(detection: dict[str, Any]) -> dict[str, Any]:
+    """Attach audio/soundscape and spectrogram URL fields when the API provides them.
+
+    GraphQL detections expose ``soundscape.url`` (audio). Species image/thumbnail
+    URLs are copied when present. Any spectrogram-like field on the detection,
+    soundscape, or REST payload is surfaced as ``spectrogram_url``.
+    """
+    out = dict(detection)
+    soundscape = out.get("soundscape")
+    if isinstance(soundscape, dict):
+        out["audio_url"] = soundscape.get("url")
+        for key in ("spectrogramUrl", "spectrogram_url", "spectrogram"):
+            if soundscape.get(key):
+                out["spectrogram_url"] = soundscape[key]
+                break
+    for key in ("spectrogramUrl", "spectrogram_url", "spectrogram"):
+        if out.get(key) and "spectrogram_url" not in out:
+            val = out[key]
+            if isinstance(val, str):
+                out["spectrogram_url"] = val
+            elif isinstance(val, dict) and val.get("url"):
+                out["spectrogram_url"] = val["url"]
+            break
+    species = out.get("species")
+    if isinstance(species, dict):
+        if species.get("imageUrl"):
+            out.setdefault("species_image_url", species["imageUrl"])
+        if species.get("thumbnailUrl"):
+            out.setdefault("species_thumbnail_url", species["thumbnailUrl"])
+        # REST sometimes uses snake_case
+        if species.get("image_url"):
+            out.setdefault("species_image_url", species["image_url"])
+        if species.get("thumbnail_url"):
+            out.setdefault("species_thumbnail_url", species["thumbnail_url"])
+    return out
+
+
+def aggregate_hourly_counts(
+    detections: list[dict[str, Any]],
+    *,
+    period: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Bucket detections into station-local hours 0–23 within ``period``."""
+    tz_name = resolve_timezone(period.get("timezone"))
+    start = _parse_date(period["from"])
+    end = _parse_date(period["to"])
+    hours = [0] * 24
+    for det in detections:
+        ts = det.get("timestamp")
+        if not ts:
+            continue
+        local = detection_local_datetime(str(ts), tz_name)
+        local_day = local.date()
+        if local_day < start or local_day > end:
+            continue
+        hours[local.hour] += 1
+    return [{"hour": h, "count": hours[h]} for h in range(24)]
+
+
+def rollup_weekly_counts(daily_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Roll day-level totals into ISO weeks (oldest first)."""
+    buckets: dict[tuple[int, int], dict[str, Any]] = {}
+    for row in daily_rows:
+        day = _parse_date(row["date"])
+        iso = day.isocalendar()
+        key = (iso.year, iso.week)
+        entry = buckets.get(key)
+        if entry is None:
+            buckets[key] = {
+                "week": f"{iso.year}-W{iso.week:02d}",
+                "from": day.isoformat(),
+                "to": day.isoformat(),
+                "total": int(row.get("total") or 0),
+            }
+        else:
+            entry["to"] = day.isoformat()
+            entry["total"] += int(row.get("total") or 0)
+    rows = sorted(buckets.values(), key=lambda r: r["from"])
+    return rows
 
 
 def aggregate_daily_counts(
@@ -521,10 +607,11 @@ class BirdWeatherClient:
         if not station:
             raise BirdWeatherError(f"Station {station_id} not found")
         det = station.get("detections") or {}
+        nodes = [enrich_detection_media(n) for n in (det.get("nodes") or [])]
         return {
             "station": {"id": station.get("id"), "name": station.get("name"), "timezone": station.get("timezone")},
             "period": period,
-            "detections": det.get("nodes") or [],
+            "detections": nodes,
             "total_count": det.get("totalCount"),
             "species_count": det.get("speciesCount"),
             "page_info": det.get("pageInfo"),
@@ -574,7 +661,7 @@ class BirdWeatherClient:
 
         return {
             "period": period,
-            "detections": filtered,
+            "detections": [enrich_detection_media(d) for d in filtered],
             "page_info": {
                 "hasNextPage": len(raw) >= limit,
                 "endCursor": next_cursor,
@@ -668,6 +755,7 @@ class BirdWeatherClient:
         period: dict[str, Any],
         species_id: str | None = None,
         max_pages: int = MAX_DETECTION_PAGES,
+        sort_by: str = "timestampDesc",
     ) -> list[dict[str, Any]]:
         """Fetch detections in a period (paginated, capped)."""
         nodes: list[dict[str, Any]] = []
@@ -679,7 +767,7 @@ class BirdWeatherClient:
                 "first": MAX_PAGE_SIZE,
                 "after": after,
                 "period": period,
-                "sortBy": "timestampDesc",
+                "sortBy": sort_by,
             }
             if species_id:
                 variables["speciesId"] = species_id
@@ -781,6 +869,306 @@ class BirdWeatherClient:
             "stations": stations,
             "total_count": conn.get("totalCount"),
             "page_info": conn.get("pageInfo"),
+            "source": "graphql",
+        }
+
+    def species_trend(
+        self,
+        station_id: str | int,
+        species: str | int,
+        *,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        days: int | None = 30,
+        timezone: str | None = None,
+        granularity: str = "day",
+    ) -> dict[str, Any]:
+        """Counts over time for one species in station-local time."""
+        gran = (granularity or "day").strip().lower()
+        if gran not in {"day", "week"}:
+            raise BirdWeatherError("granularity must be 'day' or 'week'")
+        species_id = self.resolve_species_id(species)
+        if not species_id:
+            raise BirdWeatherError("species is required")
+        daily = self.daily_counts(
+            station_id,
+            from_date=from_date,
+            to_date=to_date,
+            days=None if (from_date or to_date) else days,
+            timezone=timezone,
+            species=species_id,
+            include_species_breakdown=False,
+        )
+        # daily_counts returns newest-first; trend series oldest-first
+        day_rows = list(reversed(daily["days"]))
+        series = (
+            rollup_weekly_counts(day_rows)
+            if gran == "week"
+            else [{"date": r["date"], "total": r["total"]} for r in day_rows]
+        )
+        info = self.species_info(species_id=species_id)
+        return {
+            "station_id": str(station_id),
+            "species": info.get("species"),
+            "period": daily["period"],
+            "granularity": gran,
+            "series": series,
+            "source": "graphql",
+        }
+
+    def _earliest_detection(
+        self,
+        station_id: str | int,
+        *,
+        period: dict[str, Any],
+        species_id: str,
+    ) -> dict[str, Any] | None:
+        data = self.graphql(
+            queries.DETECTIONS,
+            {
+                "id": str(station_id),
+                "first": 1,
+                "after": None,
+                "period": period,
+                "speciesId": species_id,
+                "sortBy": "timestampAsc",
+            },
+        )
+        station = data.get("station")
+        if not station:
+            raise BirdWeatherError(f"Station {station_id} not found")
+        nodes = (station.get("detections") or {}).get("nodes") or []
+        return nodes[0] if nodes else None
+
+    def first_of_year(
+        self,
+        station_id: str | int,
+        *,
+        year: int | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        timezone: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Species whose first detection in a year/season window falls in a range.
+
+        Candidates are species heard in the arrival window (default: last 14 days
+        of the season). For each candidate (capped by ``limit``), the earliest
+        detection in the season is fetched — one cached GraphQL call per species.
+        """
+        tz = timezone or self.get_station_timezone(station_id)
+        tz_name = resolve_timezone(tz)
+        now_local = datetime.now(ZoneInfo(tz_name)).date()
+        if since:
+            season_start = _parse_date(since)
+            y = season_start.year
+        else:
+            y = int(year) if year is not None else now_local.year
+            if y < 2000 or y > 2100:
+                raise BirdWeatherError("year looks invalid")
+            season_start = date(y, 1, 1)
+        season_end = _parse_date(until) if until else now_local
+        if season_end < season_start:
+            raise BirdWeatherError("until/to must be on or after since/year start")
+
+        # Arrival window defaults to the last 14 days of the season range.
+        arrival_end = season_end
+        arrival_start = max(season_start, arrival_end - timedelta(days=13))
+        limit = max(1, min(int(limit), 100))
+
+        season = {
+            "from": season_start.isoformat(),
+            "to": season_end.isoformat(),
+            "timezone": tz_name,
+        }
+        arrival_period = {
+            "from": arrival_start.isoformat(),
+            "to": arrival_end.isoformat(),
+            "timezone": tz_name,
+        }
+        candidates = self.top_species(
+            station_id,
+            from_date=arrival_start.isoformat(),
+            to_date=arrival_end.isoformat(),
+            timezone=tz_name,
+            limit=limit,
+        )
+        arrivals: list[dict[str, Any]] = []
+        for row in candidates.get("species") or []:
+            sid = str(row.get("speciesId") or (row.get("species") or {}).get("id") or "")
+            if not sid:
+                continue
+            earliest = self._earliest_detection(
+                station_id, period=season, species_id=sid
+            )
+            if not earliest or not earliest.get("timestamp"):
+                continue
+            first_day = detection_local_date(str(earliest["timestamp"]), tz_name)
+            if first_day < arrival_start or first_day > arrival_end:
+                continue
+            species = earliest.get("species") or row.get("species") or {}
+            media = enrich_detection_media(earliest)
+            arrivals.append(
+                {
+                    "speciesId": sid,
+                    "species": {
+                        "id": sid,
+                        "commonName": species.get("commonName"),
+                        "scientificName": species.get("scientificName"),
+                    },
+                    "first_detected_on": first_day.isoformat(),
+                    "first_timestamp": earliest.get("timestamp"),
+                    "detection_id": earliest.get("id"),
+                    "soundscape": media.get("soundscape"),
+                    "audio_url": media.get("audio_url"),
+                    "spectrogram_url": media.get("spectrogram_url"),
+                }
+            )
+        arrivals.sort(key=lambda r: r["first_detected_on"])
+        return {
+            "station_id": str(station_id),
+            "year": y,
+            "season": season,
+            "arrival_window": arrival_period,
+            "species": arrivals,
+            "candidates_checked": len(candidates.get("species") or []),
+            "limit": limit,
+            "source": "graphql",
+        }
+
+    def new_arrivals(
+        self,
+        station_id: str | int,
+        *,
+        year: int | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        timezone: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        """Alias for :meth:`first_of_year`."""
+        return self.first_of_year(
+            station_id,
+            year=year,
+            since=since,
+            until=until,
+            timezone=timezone,
+            limit=limit,
+        )
+
+    def compare_stations(
+        self,
+        station_a: str | int,
+        station_b: str | int,
+        *,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        days: int | None = 7,
+        timezone: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Species overlap and differences between two stations for a period."""
+        limit = max(1, min(int(limit), 100))
+        a = self.top_species(
+            station_a,
+            from_date=from_date,
+            to_date=to_date,
+            days=None if (from_date or to_date) else days,
+            timezone=timezone,
+            limit=limit,
+        )
+        # Reuse period/timezone from A for B when timezone was omitted.
+        period = a["period"]
+        b = self.top_species(
+            station_b,
+            from_date=period["from"],
+            to_date=period["to"],
+            timezone=period["timezone"],
+            limit=limit,
+        )
+
+        def index(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+            out: dict[str, dict[str, Any]] = {}
+            for row in rows:
+                sid = str(row.get("speciesId") or (row.get("species") or {}).get("id") or "")
+                if sid:
+                    out[sid] = row
+            return out
+
+        map_a = index(a.get("species") or [])
+        map_b = index(b.get("species") or [])
+        ids_a, ids_b = set(map_a), set(map_b)
+        shared = sorted(ids_a & ids_b)
+        only_a = sorted(ids_a - ids_b)
+        only_b = sorted(ids_b - ids_a)
+
+        def brief(row: dict[str, Any]) -> dict[str, Any]:
+            sp = row.get("species") or {}
+            return {
+                "speciesId": str(row.get("speciesId") or sp.get("id")),
+                "count": row.get("count"),
+                "commonName": sp.get("commonName"),
+                "scientificName": sp.get("scientificName"),
+            }
+
+        return {
+            "period": period,
+            "station_a": a.get("station"),
+            "station_b": b.get("station"),
+            "overlap": [
+                {
+                    "speciesId": sid,
+                    "station_a": brief(map_a[sid]),
+                    "station_b": brief(map_b[sid]),
+                }
+                for sid in shared
+            ],
+            "only_station_a": [brief(map_a[sid]) for sid in only_a],
+            "only_station_b": [brief(map_b[sid]) for sid in only_b],
+            "summary": {
+                "shared": len(shared),
+                "only_a": len(only_a),
+                "only_b": len(only_b),
+                "limit": limit,
+            },
+            "source": "graphql",
+        }
+
+    def activity_by_hour(
+        self,
+        station_id: str | int,
+        *,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        days: int | None = 7,
+        timezone: str | None = None,
+        species: str | int | None = None,
+        max_pages: int = 20,
+    ) -> dict[str, Any]:
+        """Hourly detection histogram in station-local time."""
+        tz = timezone or self.get_station_timezone(station_id)
+        period = build_period(
+            from_date=from_date,
+            to_date=to_date,
+            days=None if (from_date or to_date) else days,
+            timezone=tz,
+        )
+        species_id = self.resolve_species_id(species)
+        detections = self._iter_detections(
+            station_id,
+            period=period,
+            species_id=species_id,
+            max_pages=max_pages,
+        )
+        hours = aggregate_hourly_counts(detections, period=period)
+        return {
+            "station_id": str(station_id),
+            "period": period,
+            "species_id": species_id,
+            "hours": hours,
+            "total": sum(h["count"] for h in hours),
+            "detections_scanned": len(detections),
+            "truncated": len(detections) >= max_pages * MAX_PAGE_SIZE,
             "source": "graphql",
         }
 

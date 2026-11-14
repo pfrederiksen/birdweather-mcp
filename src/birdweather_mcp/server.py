@@ -31,6 +31,7 @@ mcp = FastMCP(
     "birdweather",
     instructions=(
         "Query BirdWeather stations: detections, top species, daily counts, "
+        "species trends, new arrivals, station comparison, hourly activity, "
         "species info, and nearby stations. Public GraphQL needs no auth. "
         "Set BIRDWEATHER_STATION_TOKEN for richer station REST data. "
         "Use IANA timezones (e.g. America/Los_Angeles). Station IDs are numeric "
@@ -339,6 +340,137 @@ def search_stations(
                     query=query,
                     limit=limit,
                     after=after,
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+def species_trend(
+    station_id: str,
+    species: str,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    days: int | None = 30,
+    timezone: str | None = None,
+    granularity: str = "day",
+) -> str:
+    """Counts over time for one species at a station (station-local days or weeks)."""
+    try:
+        with _client() as client:
+            return _ok(
+                client.species_trend(
+                    station_id,
+                    species,
+                    from_date=from_date,
+                    to_date=to_date,
+                    days=None if (from_date or to_date) else days,
+                    timezone=timezone,
+                    granularity=granularity,
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+def first_of_year(
+    station_id: str,
+    year: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    timezone: str | None = None,
+    limit: int = 50,
+) -> str:
+    """Species whose first detection of the year (or season) falls in the arrival window.
+
+    Default arrival window is the last 14 days of the season (Jan 1–today, or since/until).
+    """
+    try:
+        with _client() as client:
+            return _ok(
+                client.first_of_year(
+                    station_id,
+                    year=year,
+                    since=since,
+                    until=until,
+                    timezone=timezone,
+                    limit=limit,
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+def new_arrivals(
+    station_id: str,
+    year: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    timezone: str | None = None,
+    limit: int = 50,
+) -> str:
+    """Alias for first_of_year: new species arrivals in the recent arrival window."""
+    return first_of_year(
+        station_id=station_id,
+        year=year,
+        since=since,
+        until=until,
+        timezone=timezone,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+def compare_stations(
+    station_a: str,
+    station_b: str,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    days: int | None = 7,
+    timezone: str | None = None,
+    limit: int = 100,
+) -> str:
+    """Compare species lists for two stations over the same period (overlap and uniques)."""
+    try:
+        with _client() as client:
+            return _ok(
+                client.compare_stations(
+                    station_a,
+                    station_b,
+                    from_date=from_date,
+                    to_date=to_date,
+                    days=None if (from_date or to_date) else days,
+                    timezone=timezone,
+                    limit=limit,
+                )
+            )
+    except Exception as exc:  # noqa: BLE001
+        return _err(exc)
+
+
+@mcp.tool()
+def activity_by_hour(
+    station_id: str,
+    from_date: str | None = None,
+    to_date: str | None = None,
+    days: int | None = 7,
+    timezone: str | None = None,
+    species: str | None = None,
+) -> str:
+    """Hourly detection histogram in station-local time (optional species filter)."""
+    try:
+        with _client() as client:
+            return _ok(
+                client.activity_by_hour(
+                    station_id,
+                    from_date=from_date,
+                    to_date=to_date,
+                    days=None if (from_date or to_date) else days,
+                    timezone=timezone,
+                    species=species,
                 )
             )
     except Exception as exc:  # noqa: BLE001
