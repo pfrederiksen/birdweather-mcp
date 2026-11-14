@@ -1,6 +1,6 @@
 [project]
 name = "birdweather-mcp"
-version = "0.1.1"
+version = "0.1.2"
 description = "Self-hostable MCP server for BirdWeather stations (detections, species, stats)."
 readme = "README.md"
 license = "MIT"
@@ -52,4 +52,5 @@ dev = [
   "pytest>=8",
   "pytest-asyncio>=0.24",
   "respx>=0.21",
+  "ruff>=0.17.5",
 ]

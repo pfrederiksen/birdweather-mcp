@@ -110,7 +110,13 @@ query StationDetections(
         certainty
         mode
         speciesId
-        species { id commonName scientificName }
+        species {
+          id
+          commonName
+          scientificName
+          imageUrl
+          thumbnailUrl
+        }
         soundscape { id url startTime endTime duration mode }
       }
     }

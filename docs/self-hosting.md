@@ -114,16 +114,11 @@ Point remote MCP clients at `https://mcp.home.example/mcp` only if your client s
 
 ## Healthcheck
 
-The image and compose file include a TCP healthcheck on `MCP_PORT` (default `8000`). For `stdio` transport the check exits successfully immediately (nothing listens).
+In streamable-HTTP mode the server exposes **`GET /health`** — a cheap liveness JSON probe (`{"status":"ok","version":"..."}`) that does **not** call BirdWeather. The Dockerfile `HEALTHCHECK` and compose `healthcheck` hit this path. For `stdio` transport the image check exits successfully immediately (nothing listens).
 
 ```bash
 docker inspect --format='{{.State.Health.Status}}' birdweather-mcp
-```
-
-A rough liveness probe from the host (expect a non-connection-refused response; `/mcp` may return `406`/`405` for naive GETs — that still means the process is up):
-
-```bash
-curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/mcp
+curl -s http://127.0.0.1:8000/health
 ```
 
 ## Updating

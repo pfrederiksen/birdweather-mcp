@@ -5,6 +5,15 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] — 2026-11-14
+
+### Added
+
+- In-memory TTL response cache for GraphQL and REST (`BIRDWEATHER_CACHE_TTL`, `BIRDWEATHER_CACHE_MAX_ENTRIES`, `BIRDWEATHER_CACHE_ENABLED`).
+- Retries with exponential backoff and jitter on HTTP 429/5xx and timeouts (`BIRDWEATHER_MAX_RETRIES`).
+- `GET /health` liveness endpoint in streamable-HTTP mode (no upstream call); Dockerfile and compose healthchecks use it.
+- GitHub Actions CI: ruff + unit tests on Python 3.11–3.13 (no live tests).
+
 ## [0.1.1] — 2026-11-14
 
 ### Fixed
@@ -30,5 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docs: README, self-hosting guide, tool reference with live samples, contributing, security policy.
 - Pytest suite with mocked unit tests and optional `@pytest.mark.live` smoke (set `BIRDWEATHER_TEST_STATION_ID`).
 
+[0.1.2]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.1.2
 [0.1.1]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.1.1
 [0.1.0]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.1.0
