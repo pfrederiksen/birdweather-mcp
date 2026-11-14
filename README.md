@@ -57,7 +57,7 @@ docker pull ghcr.io/pfrederiksen/birdweather-mcp:latest
 docker run --rm -i ghcr.io/pfrederiksen/birdweather-mcp:latest
 ```
 
-Long-lived HTTP on a NAS → [Self-hosting](docs/self-hosting.md). More install paths → [Installation](docs/installation.md).
+Long-lived HTTP on a NAS → [Self-hosting](docs/self-hosting.md). More install paths → [Installation](docs/installation.md). Python / MCP SDK notes → [Requirements & compatibility](docs/installation.md#requirements--compatibility).
 
 Configure Claude Desktop / Cursor / VS Code → [Clients](docs/clients.md).
 

@@ -2,6 +2,11 @@
 
 Pick one path below. For MCP client wiring after install, see [clients.md](clients.md). For long-lived HTTP on a NAS, see [self-hosting.md](self-hosting.md).
 
+## Requirements & compatibility
+
+- **Python 3.11+**
+- From **0.2.3**, the package requires `mcp>=2,<3` (MCP Python SDK 2.x). If your environment pins `mcp` 1.x, either install in an isolated environment (`pipx`, `uvx`, Homebrew, or Docker avoid the conflict) or pin `pip install birdweather-mcp==0.2.2` (last release on `mcp` 1.x). See [troubleshooting](troubleshooting.md#troubleshooting) for pip resolver conflicts.
+
 ## uvx (recommended for desktop clients)
 
 No clone required:

@@ -13,6 +13,7 @@
 | Docker arm64 “exec format” | Pull the multi-arch GHCR image, or import a `linux/arm64` image built with buildx (never build on a low-RAM NAS) |
 | Container unhealthy | `docker compose logs`; ensure `MCP_TRANSPORT=streamable-http` |
 | Token not taking effect | Restart after editing `.env`; confirm `env_file` is used |
+| `ResolutionImpossible` / cannot install `birdweather-mcp` and `mcp<2` | From 0.2.3 the package needs `mcp` 2.x. Use an isolated install (`uvx`, `pipx`, Homebrew, Docker) or pin `birdweather-mcp==0.2.2` — see [Requirements & compatibility](installation.md#requirements--compatibility) |
 
 Self-hosting-specific symptoms (Synology error 2202, `scp -O`, Tailscale userspace) are covered in [self-hosting.md](self-hosting.md#troubleshooting).
 
