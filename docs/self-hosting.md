@@ -93,9 +93,11 @@ flowchart LR
 | Bind to LAN IP / firewall allowlist | Trusted home network |
 | Tailscale / WireGuard | Access from phone/laptop away from home |
 | Reverse proxy + auth (Caddy, Nginx, Traefik) | Multiple users or semi-trusted network |
-| `MCP_AUTH_TOKEN` | Extra bearer gate on `/mcp` (`/health` stays open) |
+| `MCP_AUTH_TOKEN` | Bearer gate on `/mcp` (`/health` stays open) — **recommended** whenever the HTTP port is reachable beyond loopback |
 
 **Do not** combine `-p 8000:8000` (all interfaces) with an unauthenticated public IP.
+
+Hardening checklist (also in [SECURITY.md](../SECURITY.md)): set `MCP_AUTH_TOKEN`, prefer explicit `MCP_ALLOWED_HOSTS` (not `*`), publish loopback/LAN only, and run the non-root image. Compose enables `read_only`, `cap_drop: ALL`, `no-new-privileges`, and a `/tmp` tmpfs by default.
 
 ### Allowed Host headers (`MCP_ALLOWED_HOSTS`)
 
@@ -166,7 +168,7 @@ For GHCR pulls, pin compose to a previous semver tag (e.g. `ghcr.io/pfrederiksen
 
 ### Optional HTTP bearer auth (`MCP_AUTH_TOKEN`)
 
-When `MCP_AUTH_TOKEN` is set, requests to `/mcp` (and other non-public routes) must include `Authorization: Bearer <token>`. **`GET /health` stays open** for probes. The token is never logged. Leave unset for open LAN/Tailscale use behind your own network controls.
+When `MCP_AUTH_TOKEN` is set, requests to `/mcp` (and other non-public routes) must include `Authorization: Bearer <token>`. **`GET /health` stays open** for probes (exact path only). WebSocket scopes are rejected when a token is configured. The token is never logged. Binding HTTP to a non-loopback host (or `MCP_ALLOWED_HOSTS=*`) without a token logs a SECURITY warning but still starts (backward compatible). Prefer setting a token whenever clients can reach the port off-box.
 
 ## Synology NAS (Container Manager)
 

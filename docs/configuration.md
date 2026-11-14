@@ -8,10 +8,10 @@ All settings are environment variables (or CLI flags that mirror the transport t
 |----------|----------|---------|-------------|
 | `BIRDWEATHER_STATION_TOKEN` | No | unset | Station API token for REST detections / all-time stats. **Never logged.** Without it, public GraphQL only. |
 | `MCP_TRANSPORT` | No | `stdio` | `stdio`, `streamable-http`, or `sse`. Overridable with `--transport`. |
-| `MCP_HOST` | No | `127.0.0.1` | Bind host for HTTP transports. Overridable with `--host`. Inside Docker use `0.0.0.0` and restrict with host port publish. |
+| `MCP_HOST` | No | `127.0.0.1` | Bind host for HTTP transports. Overridable with `--host`. Inside Docker use `0.0.0.0` and restrict with host port publish (prefer `127.0.0.1` or LAN-only on the host). Non-loopback bind without `MCP_AUTH_TOKEN` logs a SECURITY warning. |
 | `MCP_PORT` | No | `8000` | Bind port for HTTP transports. Overridable with `--port`. |
-| `MCP_ALLOWED_HOSTS` | No | unset (loopback only) | Comma-separated Host header patterns for streamable-HTTP DNS-rebinding protection (e.g. `nas.example.local:*,192.168.1.10:*`). Unset = FastMCP loopback defaults. `*` = allow any host (**trusted networks only**). Fixes `421 Invalid Host header` for MagicDNS/LAN names. |
-| `MCP_AUTH_TOKEN` | No | unset | When set, HTTP `/mcp` requires `Authorization: Bearer …`. `/health` stays open. Never logged. |
+| `MCP_ALLOWED_HOSTS` | No | unset (loopback only) | Comma-separated Host header patterns for streamable-HTTP DNS-rebinding protection (e.g. `nas.example.local:*,192.168.1.10:*`). Unset = FastMCP loopback defaults. `*` = allow any host (**trusted networks only**; warns if `MCP_AUTH_TOKEN` is unset). Fixes `421 Invalid Host header` for MagicDNS/LAN names. |
+| `MCP_AUTH_TOKEN` | No | unset | When set, HTTP `/mcp` requires `Authorization: Bearer …` (constant-time compare). Exact `/health` stays open; websockets are rejected. Strongly recommended for non-loopback HTTP. Never logged. |
 | `BIRDWEATHER_CACHE_TTL` | No | `60` | In-memory upstream cache TTL in seconds. Set `0` to disable. |
 | `BIRDWEATHER_CACHE_MAX_ENTRIES` | No | `256` | Max cached GraphQL/REST responses. |
 | `BIRDWEATHER_CACHE_ENABLED` | No | enabled when TTL &gt; 0 | Set `false` / `0` / `no` / `off` to disable caching; `true` / `1` / `yes` / `on` to force on. |
@@ -20,11 +20,11 @@ All settings are environment variables (or CLI flags that mirror the transport t
 
 ### Logging
 
-The server logs to stderr at **INFO** with format `%(levelname)s %(name)s: %(message)s`. There is no log-level env var today. Station and MCP auth tokens are **never** written to logs or tool/error payloads (URLs that might embed a token are redacted). See [SECURITY.md](../SECURITY.md).
+The server logs to stderr at **INFO** with format `%(levelname)s %(name)s: %(message)s`. There is no log-level env var today. Station and MCP auth tokens are **never** written to logs or tool/error payloads (raw and URL-encoded forms are redacted via a logging filter; `httpx`/`httpcore` are set to WARNING so request URLs are not printed). See [SECURITY.md](../SECURITY.md).
 
 ### Health endpoint
 
-In `streamable-http` mode, `GET /health` returns `{"status":"ok","version":"..."}` with **no** upstream BirdWeather call. Used by Docker/compose healthchecks. Unaffected by `MCP_AUTH_TOKEN`.
+In `streamable-http` mode, `GET /health` returns `{"status":"ok","version":"..."}` with **no** upstream BirdWeather call. Used by Docker/compose healthchecks. Unaffected by `MCP_AUTH_TOKEN` (exact path only — `/health/../mcp` is not public).
 
 ## Finding a station ID and token
 
