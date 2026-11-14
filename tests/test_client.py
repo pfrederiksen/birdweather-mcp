@@ -13,8 +13,10 @@ from birdweather_mcp.client import (
     REST_BASE,
     BirdWeatherClient,
     BirdWeatherError,
+    aggregate_daily_counts,
     bbox_from_point,
     build_period,
+    detection_local_date,
 )
 
 
@@ -50,6 +52,165 @@ def test_bbox_from_point():
     ne, sw = bbox_from_point(37.77, -122.42, 10)
     assert sw["lat"] < 37.77 < ne["lat"]
     assert sw["lon"] < -122.42 < ne["lon"]
+
+
+def test_detection_local_date_crosses_utc_midnight():
+    # 2026-11-14 01:30 UTC = 2026-11-13 evening in America/Los_Angeles
+    assert (
+        detection_local_date(
+            "2026-11-14T01:30:00+00:00", "America/Los_Angeles"
+        ).isoformat()
+        == "2026-11-13"
+    )
+    assert (
+        detection_local_date(
+            "2026-11-14T16:00:00Z", "America/Los_Angeles"
+        ).isoformat()
+        == "2026-11-14"
+    )
+
+
+def test_aggregate_daily_counts_honors_timezone_and_range():
+    period = {
+        "from": "2026-11-13",
+        "to": "2026-11-13",
+        "timezone": "America/Los_Angeles",
+    }
+    detections = [
+        # UTC morning → still Nov 12 local? No: 08:00 UTC = Nov 13 00:00 PST
+        {
+            "timestamp": "2026-11-13T08:00:00+00:00",
+            "speciesId": "134",
+            "species": {
+                "id": "134",
+                "commonName": "House Finch",
+                "scientificName": "Haemorhous mexicanus",
+            },
+        },
+        # Late evening local Nov 13 (= Nov 14 UTC) must count as Nov 13 local
+        {
+            "timestamp": "2026-11-14T06:00:00+00:00",
+            "speciesId": "134",
+            "species": {
+                "id": "134",
+                "commonName": "House Finch",
+                "scientificName": "Haemorhous mexicanus",
+            },
+        },
+        # Outside requested local day (Nov 14 local morning)
+        {
+            "timestamp": "2026-11-14T16:00:00+00:00",
+            "speciesId": "75",
+            "species": {
+                "id": "75",
+                "commonName": "Common Raven",
+                "scientificName": "Corvus corax",
+            },
+        },
+    ]
+    rows = aggregate_daily_counts(detections, period=period)
+    assert len(rows) == 1
+    assert rows[0]["date"] == "2026-11-13"
+    assert rows[0]["total"] == 2
+    assert rows[0]["counts"][0]["speciesId"] == "134"
+    assert rows[0]["counts"][0]["count"] == 2
+
+
+def test_aggregate_daily_counts_filters_extra_following_day():
+    """Simulate GraphQL overshoot: from==to must not keep a following-day row."""
+    period = {
+        "from": "2026-11-14",
+        "to": "2026-11-14",
+        "timezone": "America/Los_Angeles",
+    }
+    detections = [
+        {
+            "timestamp": "2026-11-14T20:00:00-08:00",
+            "speciesId": "1",
+            "species": {"id": "1", "commonName": "A", "scientificName": "A a"},
+        },
+        {
+            "timestamp": "2026-11-15T01:00:00-08:00",
+            "speciesId": "2",
+            "species": {"id": "2", "commonName": "B", "scientificName": "B b"},
+        },
+    ]
+    rows = aggregate_daily_counts(
+        detections, period=period, include_species_breakdown=False
+    )
+    assert [r["date"] for r in rows] == ["2026-11-14"]
+    assert rows[0]["total"] == 1
+    assert "counts" not in rows[0]
+
+
+@respx.mock
+def test_daily_counts_aggregates_from_detections(client: BirdWeatherClient):
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        q = body["query"]
+        if "detections" not in q:
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "station": {"timezone": "America/Los_Angeles"}
+                    }
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "station": {
+                        "id": "12345",
+                        "name": "Example Station",
+                        "timezone": "America/Los_Angeles",
+                        "detections": {
+                            "totalCount": 2,
+                            "speciesCount": 1,
+                            "pageInfo": {
+                                "hasNextPage": False,
+                                "endCursor": None,
+                            },
+                            "nodes": [
+                                {
+                                    "id": "1",
+                                    "timestamp": "2026-11-14T10:00:00-08:00",
+                                    "speciesId": "134",
+                                    "species": {
+                                        "id": "134",
+                                        "commonName": "House Finch",
+                                        "scientificName": "Haemorhous mexicanus",
+                                    },
+                                },
+                                {
+                                    "id": "2",
+                                    "timestamp": "2026-11-14T18:00:00-08:00",
+                                    "speciesId": "134",
+                                    "species": {
+                                        "id": "134",
+                                        "commonName": "House Finch",
+                                        "scientificName": "Haemorhous mexicanus",
+                                    },
+                                },
+                            ],
+                        },
+                    }
+                }
+            },
+        )
+
+    respx.post(GRAPHQL_URL).mock(side_effect=handler)
+    out = client.daily_counts(
+        12345,
+        from_date="2026-11-14",
+        to_date="2026-11-14",
+        include_species_breakdown=True,
+    )
+    assert out["period"]["timezone"] == "America/Los_Angeles"
+    assert len(out["days"]) == 1
+    assert out["days"][0]["date"] == "2026-11-14"
+    assert out["days"][0]["total"] == 2
 
 
 @respx.mock
