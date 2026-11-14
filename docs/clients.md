@@ -1,12 +1,10 @@
 # MCP client configurations
 
-Configure Claude Desktop, Cursor, and other MCP clients to talk to birdweather-mcp over **stdio** (local process), **uvx** (ephemeral install), or **streamable-HTTP** (self-hosted Docker / NAS).
+Configure Claude Desktop, Cursor, and other MCP clients to talk to birdweather-mcp over **stdio** (local process), **uvx** / Homebrew, or **streamable-HTTP** (self-hosted Docker / NAS).
 
-Use placeholder station id `12345` in prompts. Never put a real `BIRDWEATHER_STATION_TOKEN` or `MCP_AUTH_TOKEN` in committed files.
+Use placeholder station id `12345` in prompts. Never put a real `BIRDWEATHER_STATION_TOKEN` or `MCP_AUTH_TOKEN` in committed files. Env reference: [configuration.md](configuration.md). Install paths: [installation.md](installation.md).
 
 ## stdio via uvx (recommended for desktop clients)
-
-After the package is on PyPI:
 
 ```json
 {
@@ -19,7 +17,7 @@ After the package is on PyPI:
 }
 ```
 
-Until PyPI publish is configured, install from git:
+From git:
 
 ```json
 {
@@ -27,6 +25,20 @@ Until PyPI publish is configured, install from git:
     "birdweather": {
       "command": "uvx",
       "args": ["--from", "git+https://github.com/pfrederiksen/birdweather-mcp", "birdweather-mcp"]
+    }
+  }
+}
+```
+
+## stdio via Homebrew
+
+After `brew install pfrederiksen/tap/birdweather-mcp`:
+
+```json
+{
+  "mcpServers": {
+    "birdweather": {
+      "command": "birdweather-mcp"
     }
   }
 }
