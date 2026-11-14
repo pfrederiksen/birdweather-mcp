@@ -4,6 +4,8 @@ Run birdweather-mcp as a **long-lived streamable-HTTP** service so MCP clients o
 
 > **Security first:** bind to loopback, LAN, or Tailscale only. Do **not** publish port 8000 to the public internet without an authenticated reverse proxy. See [SECURITY.md](../SECURITY.md).
 
+For install options (uvx, Homebrew, pip), see [installation.md](installation.md). Env reference: [configuration.md](configuration.md).
+
 ## Quick start (Docker Compose)
 
 **Prefer the prebuilt multi-arch image** from GitHub Container Registry (`linux/amd64` + `linux/arm64`):
@@ -24,6 +26,8 @@ If the GHCR package is private, authenticate once (`docker login ghcr.io`) with 
 ```bash
 docker compose up -d --build
 ```
+
+**Never build on a low-RAM NAS** (e.g. 1 GB devices such as Synology DS223j) while other containers are running — builds often OOM or thrash. Pull GHCR or import an image built off-NAS (see Synology below).
 
 Check status:
 
@@ -52,7 +56,7 @@ docker run --rm -d \
   -p 127.0.0.1:8000:8000 \
   ghcr.io/pfrederiksen/birdweather-mcp:latest --transport streamable-http --host 0.0.0.0 --port 8000
 
-# Alternative: build from this repo
+# Alternative: build from this repo (on a desktop / CI, not a low-RAM NAS)
 docker build -t birdweather-mcp:local .
 ```
 
@@ -81,7 +85,7 @@ flowchart LR
   MCP -.->|"only if BIRDWEATHER_STATION_TOKEN set"| REST
 ```
 
-## Securing the service
+## Securing the service (LAN / Tailscale)
 
 | Approach | When to use |
 |----------|-------------|
@@ -89,6 +93,7 @@ flowchart LR
 | Bind to LAN IP / firewall allowlist | Trusted home network |
 | Tailscale / WireGuard | Access from phone/laptop away from home |
 | Reverse proxy + auth (Caddy, Nginx, Traefik) | Multiple users or semi-trusted network |
+| `MCP_AUTH_TOKEN` | Extra bearer gate on `/mcp` (`/health` stays open) |
 
 **Do not** combine `-p 8000:8000` (all interfaces) with an unauthenticated public IP.
 
@@ -126,7 +131,7 @@ mcp.home.example {
 
 Point remote MCP clients at `https://mcp.home.example/mcp` only if your client supports HTTP MCP + your auth scheme.
 
-## Healthcheck
+## Healthcheck (`/health`)
 
 In streamable-HTTP mode the server exposes **`GET /health`** — a cheap liveness JSON probe (`{"status":"ok","version":"..."}`) that does **not** call BirdWeather. The Dockerfile `HEALTHCHECK` and compose `healthcheck` hit this path. For `stdio` transport the image check exits successfully immediately (nothing listens).
 
@@ -135,7 +140,9 @@ docker inspect --format='{{.State.Health.Status}}' birdweather-mcp
 curl -s http://127.0.0.1:8000/health
 ```
 
-## Updating
+## Updates and rollback
+
+### Update
 
 ```bash
 docker compose pull
@@ -144,13 +151,26 @@ docker compose up -d
 
 Or, when building from source: `git pull && docker compose up -d --build`. Compose `restart: unless-stopped` brings the new container back on reboot.
 
+### Rollback (keep the previous image tarball)
+
+Before upgrading an imported/local image (especially Synology), keep the previous archive:
+
+```bash
+# Example: save current local image before replacing it
+docker save birdweather-mcp:local -o birdweather-mcp-previous.tar
+# After a bad upgrade, re-import and retag, then recreate the project
+docker load -i birdweather-mcp-previous.tar
+```
+
+For GHCR pulls, pin compose to a previous semver tag (e.g. `ghcr.io/pfrederiksen/birdweather-mcp:0.2.0`) instead of `latest`, then `docker compose up -d`.
+
 ### Optional HTTP bearer auth (`MCP_AUTH_TOKEN`)
 
 When `MCP_AUTH_TOKEN` is set, requests to `/mcp` (and other non-public routes) must include `Authorization: Bearer <token>`. **`GET /health` stays open** for probes. The token is never logged. Leave unset for open LAN/Tailscale use behind your own network controls.
 
 ## Synology NAS (Container Manager)
 
-Works on x86 and **arm64** models (e.g. **DS223j**). Prefer an image built **off-NAS** for low-RAM devices.
+Works on x86 and **arm64** models (e.g. **DS223j**). Prefer an image built **off-NAS** for low-RAM devices — **never run `docker build` / `compose build` on the NAS** while other containers are running.
 
 ### Folder layout
 
@@ -174,11 +194,9 @@ Point `docker-compose.yml` at that image (the repo compose file already does). N
 
 If the package is private, log in to `ghcr.io` in Container Manager with a GitHub PAT that has `read:packages`.
 
-### Build off-NAS (alternative on low-RAM devices)
+### Off-NAS arm64 image import (low-RAM)
 
-Do **not** run `docker build` / `compose build` on a 1 GB NAS (e.g. DS223j) while other containers are running — builds often OOM or thrash. Prefer the GHCR pull above.
-
-If you must build locally, use a desktop (or CI) with Docker Buildx:
+Do **not** build on the NAS. On a desktop (or CI) with Docker Buildx:
 
 ```bash
 # From a checkout of this repo
@@ -192,6 +210,8 @@ Copy the archive to the NAS share (if modern `scp` fails with `subsystem request
 ```bash
 scp -O birdweather-mcp-arm64.tar admin@192.168.1.10:/docker/apps/birdweather-mcp/
 ```
+
+Keep a copy of the **previous** tarball on the NAS (or desktop) for rollback.
 
 Then in **Container Manager** → **Image** → **Add** → **From File**, import `birdweather-mcp-arm64.tar` from `/docker/apps/birdweather-mcp/`. Tag/name it `birdweather-mcp:local` and set compose `image:` accordingly.
 
@@ -272,7 +292,7 @@ Do not rely on Synology QuickConnect or a public port forward for MCP.
 
 ## Connecting clients to HTTP
 
-Clients that support remote / HTTP MCP can use the streamable-HTTP URL. Example shape (exact keys vary by client version):
+Clients that support remote / HTTP MCP can use the streamable-HTTP URL. Full examples: [clients.md](clients.md).
 
 ```json
 {
@@ -284,7 +304,7 @@ Clients that support remote / HTTP MCP can use the streamable-HTTP URL. Example 
 }
 ```
 
-For Claude Desktop / Cursor on the same machine, **stdio via `uvx`** is often simpler. Use HTTP when the server must live on a NAS or always-on box.
+For Claude Desktop / Cursor on the same machine, **stdio via `uvx` or Homebrew** is often simpler. Use HTTP when the server must live on a NAS or always-on box.
 
 ## Troubleshooting
 
@@ -295,10 +315,10 @@ For Claude Desktop / Cursor on the same machine, **stdio via `uvx`** is often si
 | `421 Invalid Host header` | Set `MCP_ALLOWED_HOSTS` to the hostname clients use (or `*` on trusted nets) |
 | Client can't negotiate MCP | URL must include `/mcp`; client must speak streamable-HTTP |
 | arm64 exec format error | Image was built for amd64 — import a `linux/arm64` image built with buildx |
-| Build OOM on NAS | Build `linux/arm64` off-NAS; import the `.tar` in Container Manager |
+| Build OOM on NAS | Never build on low-RAM NAS; pull GHCR or import an off-NAS `.tar` |
 | `docker compose` permission denied | Use Container Manager Projects (UI); `docker.sock` is often root-only |
 | Project start error 2202 | Create/build the project (and import the image) before Start |
 | `scp` subsystem request failed | Use `scp -O` |
 | Token not taking effect | Restart after editing `.env`; confirm `env_file` is used (not an empty inline value) |
 
-More FAQ items live in the [README](../README.md#faq).
+More FAQ: [troubleshooting.md](troubleshooting.md).

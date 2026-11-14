@@ -1,4 +1,4 @@
-# Tool reference
+# Tools, prompts, and resources
 
 All tools return **JSON strings** (pretty-printed). Errors look like `{"error": "..."}`.
 
@@ -10,7 +10,15 @@ Public GraphQL needs **no token**. Set `BIRDWEATHER_STATION_TOKEN` only when you
 - `days=N` = last N calendar days **including today** in that timezone.
 - Prefer either `days` **or** `from_date`/`to_date`, not both.
 
-Samples below use a generic placeholder station (`12345` / “Example Station”) and keep the live response shape. Counts and detections change over time — treat them as shape references. Find your real id at `https://app.birdweather.com/stations/<id>`.
+Samples below use a generic placeholder station (`12345` / “Example Station”) and keep the live response shape. Counts and detections change over time — treat them as shape references. Find your real id at `https://app.birdweather.com/stations/<id>` — see [configuration.md](configuration.md).
+
+## Registered surface
+
+| Kind | Names |
+|------|--------|
+| Tools (15) | `get_station`, `station_counts`, `get_weather`, `recent_detections`, `top_species`, `species_list`, `daily_counts`, `species_info`, `search_species`, `search_stations`, `species_trend`, `first_of_year`, `new_arrivals`, `compare_stations`, `activity_by_hour` |
+| Prompts (3) | `daily_station_summary`, `weekly_report`, `species_deep_dive` |
+| Resources (2) | `birdweather://station/{station_id}`, `birdweather://station/{station_id}/species` |
 
 ---
 
@@ -539,3 +547,47 @@ Stations near a lat/lon (default 25 km) and/or by name. Geographic hits include 
   "source": "graphql"
 }
 ```
+
+---
+
+## Prompts
+
+Built-in MCP prompts that steer the client to call the right tools. Defaults use placeholder station `12345`.
+
+### `daily_station_summary`
+
+| Param | Type | Default |
+|-------|------|---------|
+| `station_id` | string | `12345` |
+
+Asks for today’s activity via `get_station`, `station_counts` (days=1), `top_species` (days=1), and `recent_detections` (days=1).
+
+### `weekly_report`
+
+| Param | Type | Default |
+|-------|------|---------|
+| `station_id` | string | `12345` |
+
+Weekly report via `station_counts`, `top_species`, `daily_counts`, `activity_by_hour`, and `new_arrivals`.
+
+### `species_deep_dive`
+
+| Param | Type | Default |
+|-------|------|---------|
+| `station_id` | string | `12345` |
+| `species` | string | `House Finch` |
+
+Deep-dive one species via `species_info`, `species_trend`, `recent_detections`, and `activity_by_hour`.
+
+---
+
+## Resources
+
+URI templates return JSON (same shapes as the related tools).
+
+| URI | Name | Description |
+|-----|------|-------------|
+| `birdweather://station/{station_id}` | `station_info` | Station metadata (`get_station`) |
+| `birdweather://station/{station_id}/species` | `station_species_list` | Top species for the last 7 days (`top_species`, limit 50) |
+
+Example: `birdweather://station/12345` → Example Station metadata JSON.
