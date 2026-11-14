@@ -46,7 +46,7 @@ uv run ruff check .
 
 ```text
 src/birdweather_mcp/
-  server.py      # FastMCP tools, prompts, resources, CLI, /health
+  server.py      # MCPServer (MCP Python SDK 2.x) tools, prompts, resources, CLI, /health
   client.py      # GraphQL + optional station REST
   queries.py     # GraphQL query strings
   cache.py       # In-memory TTL cache

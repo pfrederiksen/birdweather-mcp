@@ -6,10 +6,14 @@ import json
 
 import httpx
 import respx
+from starlette.testclient import TestClient
 
 from birdweather_mcp.client import GRAPHQL_URL
 from birdweather_mcp.server import (
+    _DEFAULT_ALLOWED_HOSTS,
+    _DEFAULT_ALLOWED_ORIGINS,
     get_station,
+    mcp,
     parse_allowed_hosts,
     search_species,
     species_info,
@@ -137,13 +141,11 @@ def test_parse_allowed_hosts():
 
 def test_transport_security_from_env_star_disables_protection():
     settings = transport_security_from_env("*")
-    assert settings is not None
     assert settings.enable_dns_rebinding_protection is False
 
 
 def test_transport_security_from_env_merges_loopback():
     settings = transport_security_from_env("mcp.home.example:*")
-    assert settings is not None
     assert settings.enable_dns_rebinding_protection is True
     assert "127.0.0.1:*" in settings.allowed_hosts
     assert "mcp.home.example:*" in settings.allowed_hosts
@@ -152,8 +154,51 @@ def test_transport_security_from_env_merges_loopback():
 
 
 def test_transport_security_from_env_unset():
-    assert transport_security_from_env("") is None
-    assert transport_security_from_env(None) is None
+    """Unset/empty enables protection with loopback-only hosts (not None)."""
+    for raw in ("", None):
+        settings = transport_security_from_env(raw)
+        assert settings.enable_dns_rebinding_protection is True
+        assert settings.allowed_hosts == list(_DEFAULT_ALLOWED_HOSTS)
+        assert settings.allowed_origins == list(_DEFAULT_ALLOWED_ORIGINS)
+
+
+def test_streamable_http_rejects_non_loopback_host_when_allowed_hosts_unset(
+    monkeypatch,
+):
+    """Binding 0.0.0.0 without MCP_ALLOWED_HOSTS still rejects non-loopback Host."""
+    monkeypatch.delenv("MCP_ALLOWED_HOSTS", raising=False)
+    app = mcp.streamable_http_app(
+        host="0.0.0.0",
+        transport_security=transport_security_from_env(),
+    )
+    init_body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "0"},
+        },
+    }
+    headers_base = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream",
+    }
+    with TestClient(app) as client:
+        ok = client.post(
+            "/mcp",
+            headers={**headers_base, "Host": "127.0.0.1:8000"},
+            json=init_body,
+        )
+        assert ok.status_code == 200
+        bad = client.post(
+            "/mcp",
+            headers={**headers_base, "Host": "192.168.1.10:8000"},
+            json=init_body,
+        )
+        assert bad.status_code == 421
+        assert "Invalid Host header" in bad.text
 
 
 @respx.mock
