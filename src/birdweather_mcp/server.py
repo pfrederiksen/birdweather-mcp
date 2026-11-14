@@ -1,4 +1,4 @@
-"""BirdWeather MCP server (FastMCP / stdio by default)."""
+"""BirdWeather MCP server (MCPServer / stdio by default)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import logging
 import os
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -85,7 +85,7 @@ def warn_insecure_http_defaults(*, host: str, transport: str) -> None:
             "Set MCP_AUTH_TOKEN on trusted networks."
         )
 
-# FastMCP defaults — keep when MCP_ALLOWED_HOSTS is unset.
+# MCPServer / SDK defaults — keep when MCP_ALLOWED_HOSTS is unset.
 _DEFAULT_ALLOWED_HOSTS = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
 _DEFAULT_ALLOWED_ORIGINS = [
     "http://127.0.0.1:*",
@@ -93,7 +93,7 @@ _DEFAULT_ALLOWED_ORIGINS = [
     "http://[::1]:*",
 ]
 
-mcp = FastMCP(
+mcp = MCPServer(
     "birdweather",
     instructions=(
         "Query BirdWeather stations: detections, top species, daily counts, "
@@ -103,6 +103,7 @@ mcp = FastMCP(
         "Use IANA timezones (e.g. America/Los_Angeles). Station IDs are numeric "
         "(see app.birdweather.com/stations/<id>)."
     ),
+    version=__version__,
 )
 
 
@@ -110,7 +111,7 @@ def parse_allowed_hosts(raw: str | None) -> list[str] | None:
     """Parse ``MCP_ALLOWED_HOSTS``.
 
     Returns:
-      - ``None`` if unset/empty (caller should keep FastMCP defaults)
+      - ``None`` if unset/empty (caller should keep SDK loopback defaults)
       - ``[]`` when ``*`` (disable DNS rebinding protection / allow any host)
       - otherwise a list of Host header patterns (comma-separated)
     """
@@ -130,7 +131,7 @@ def transport_security_from_env(
 ) -> TransportSecuritySettings | None:
     """Build transport security settings from ``MCP_ALLOWED_HOSTS``.
 
-    - Unset: return ``None`` (leave FastMCP defaults alone).
+    - Unset: return ``None`` (leave SDK loopback defaults alone).
     - ``*``: disable DNS rebinding protection (trusted networks only).
     - Comma-separated hosts: enable protection with those hosts plus loopback
       defaults. Patterns like ``hostname:*`` allow any port. Matching
@@ -637,11 +638,11 @@ def _install_optional_http_auth() -> None:
     _orig_streamable = mcp.streamable_http_app
     _orig_sse = mcp.sse_app
 
-    def streamable_http_app_with_auth():
-        return wrap_app_with_optional_auth(_orig_streamable())
+    def streamable_http_app_with_auth(**kwargs):
+        return wrap_app_with_optional_auth(_orig_streamable(**kwargs))
 
-    def sse_app_with_auth(mount_path: str | None = None):
-        return wrap_app_with_optional_auth(_orig_sse(mount_path))
+    def sse_app_with_auth(**kwargs):
+        return wrap_app_with_optional_auth(_orig_sse(**kwargs))
 
     mcp.streamable_http_app = streamable_http_app_with_auth  # type: ignore[method-assign]
     mcp.sse_app = sse_app_with_auth  # type: ignore[method-assign]
@@ -678,18 +679,16 @@ def main() -> None:
         format="%(levelname)s %(name)s: %(message)s",
     )
     # Avoid httpx/httpcore INFO request-URL logs (REST embeds the station token).
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    # mcp 2.x uses httpx2/httpcore2 for its own HTTP; quiet those too.
+    for _name in ("httpx", "httpcore", "httpx2", "httpcore2"):
+        logging.getLogger(_name).setLevel(logging.WARNING)
     install_token_redact_filter()
     # Never log env token values.
     if os.environ.get("BIRDWEATHER_STATION_TOKEN"):
         logger.info("Station REST API enabled (token present, not logged)")
 
-    mcp.settings.host = args.host
-    mcp.settings.port = args.port
     security = transport_security_from_env()
     if security is not None:
-        mcp.settings.transport_security = security
         if not security.enable_dns_rebinding_protection:
             logger.info(
                 "DNS rebinding protection disabled (MCP_ALLOWED_HOSTS=*); "
@@ -703,7 +702,17 @@ def main() -> None:
 
     warn_insecure_http_defaults(host=args.host, transport=args.transport)
     _install_optional_http_auth()
-    mcp.run(transport=args.transport)
+    if args.transport == "stdio":
+        mcp.run(transport="stdio")
+    else:
+        # host must reach streamable_http_app/sse_app so DNS-rebinding
+        # auto-enable (loopback only) matches bind address, including 0.0.0.0.
+        mcp.run(
+            transport=args.transport,
+            host=args.host,
+            port=args.port,
+            transport_security=security,
+        )
 
 
 if __name__ == "__main__":
