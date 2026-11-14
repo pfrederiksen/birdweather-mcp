@@ -176,6 +176,14 @@ Full parameter lists and **sample JSON** (placeholders — use your own station 
 - `days=N` means the last N calendar days **including today**.
 - If neither `days` nor dates are given, tools that need a window typically default to **1 day** (`recent_detections`) or **7 days** (counts / top species).
 
+## Demo
+
+<p align="center">
+  <img src="docs/assets/demo.svg" alt="Demo conversation about Example Station 12345" width="100%" />
+</p>
+
+Placeholder illustration of asking an MCP client about **Example Station** (`12345`) — not live data.
+
 ## Example conversations
 
 **You:** What’s station 12345 been hearing this week?
@@ -186,13 +194,18 @@ Full parameter lists and **sample JSON** (placeholders — use your own station 
 
 **You:** Any high-confidence House Finches today? Link me a soundscape if you can.
 
-**Assistant:** *(calls `recent_detections` with `species="House Finch"`, `min_confidence=0.7`, `days=1`)* Returns timestamps, confidence, and `soundscape.url` FLAC links when available.
+**Assistant:** *(calls `recent_detections` with `species="House Finch"`, `min_confidence=0.7`, `days=1`)* Returns timestamps, confidence, and `soundscape.url` / `audio_url` FLAC links when available.
 
 ---
 
 **You:** What stations are near 37.77, −122.42?
 
 **Assistant:** *(calls `search_stations` with lat/lon)* Lists nearby PUCs and BirdNET-Pi stations with `distance_km`.
+
+### Prompts & resources
+
+Built-in prompts: `daily_station_summary`, `weekly_report`, `species_deep_dive`.  
+Resources: `birdweather://station/{station_id}`, `birdweather://station/{station_id}/species` (7-day species list).
 
 ## Architecture
 
