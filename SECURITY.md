@@ -5,6 +5,7 @@
 | Version | Supported |
 |---------|-----------|
 | 0.1.x   | Yes       |
+| 0.2.x   | Yes (when released) |
 
 ## Reporting a vulnerability
 
@@ -35,7 +36,7 @@ The default transport is **stdio** (no open port). If you run **streamable-http*
 - Bind to `127.0.0.1`, a LAN interface, or a Tailscale IP — **not** `0.0.0.0` on a public host unless you have auth in front.
 - The compose file maps `127.0.0.1:8000:8000` by design.
 - Put a reverse proxy with authentication in front if untrusted clients must reach the MCP endpoint.
-- This server does **not** implement its own API keys or OAuth.
+- Optional shared-secret gate: set `MCP_AUTH_TOKEN` so `/mcp` requires `Authorization: Bearer …` (`/health` remains open). This is not a substitute for network isolation on the public internet.
 - Host-header allowlisting (`MCP_ALLOWED_HOSTS`) defaults to loopback. Set explicit hostnames (or `*` only on trusted networks) when clients use LAN/MagicDNS names; see [docs/self-hosting.md](docs/self-hosting.md).
 
 See [docs/self-hosting.md](docs/self-hosting.md) for LAN / Tailscale / Synology hardening notes.

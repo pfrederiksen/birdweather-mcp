@@ -28,11 +28,17 @@ BirdWeather already records rich detection data. This server makes that data **t
 - **stdio** (Claude Desktop / Cursor) or **streamable-HTTP** (Docker / Synology / Tailscale)
 - **Period helpers** — `days=N` or `from_date`/`to_date` in the station’s timezone
 - **Token-safe** — redacted in logs and errors ([SECURITY.md](SECURITY.md))
-- **Docker + compose** — multi-arch `python:3.12-slim` (amd64 / arm64, including Synology DS223j-class NAS)
+- **Docker + compose** — prebuilt multi-arch images on GHCR (`ghcr.io/pfrederiksen/birdweather-mcp`), including Synology DS223j-class NAS
 
 ## Quickstart (< 60 seconds)
 
-**uvx** (no clone):
+**uvx** (no clone — after PyPI publish):
+
+```bash
+uvx birdweather-mcp
+```
+
+From git until the package is on PyPI:
 
 ```bash
 uvx --from git+https://github.com/pfrederiksen/birdweather-mcp birdweather-mcp
@@ -58,11 +64,12 @@ birdweather-mcp
 **Docker** (stdio for MCP clients that spawn the container):
 
 ```bash
-docker build -t birdweather-mcp .
-docker run --rm -i birdweather-mcp
+docker pull ghcr.io/pfrederiksen/birdweather-mcp:latest
+docker run --rm -i ghcr.io/pfrederiksen/birdweather-mcp:latest
+# or: docker build -t birdweather-mcp:local . && docker run --rm -i birdweather-mcp:local
 ```
 
-Long-lived HTTP on a NAS / always-on box → [Self-hosting guide](docs/self-hosting.md) (`docker compose up -d`).
+Long-lived HTTP on a NAS / always-on box → [Self-hosting guide](docs/self-hosting.md) (`docker compose pull && docker compose up -d`).
 
 ### Transports
 
@@ -94,90 +101,24 @@ Without a token, all GraphQL tools still work for any public station. With a tok
 
 ## Configure MCP clients
 
-### Claude Desktop
+Full examples (Claude Desktop, Cursor, Claude Code, VS Code, HTTP + bearer): **[docs/clients.md](docs/clients.md)**.
 
-`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or the equivalent on Windows:
-
-```json
-{
-  "mcpServers": {
-    "birdweather": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/pfrederiksen/birdweather-mcp", "birdweather-mcp"],
-      "env": {
-        "BIRDWEATHER_STATION_TOKEN": ""
-      }
-    }
-  }
-}
-```
-
-Omit `BIRDWEATHER_STATION_TOKEN` (or leave it empty) for public GraphQL only. Local checkout:
-
-```json
-{
-  "mcpServers": {
-    "birdweather": {
-      "command": "uv",
-      "args": ["run", "--directory", "/absolute/path/to/birdweather-mcp", "birdweather-mcp"]
-    }
-  }
-}
-```
-
-### Cursor
-
-Project `.cursor/mcp.json` or Cursor MCP settings:
+**uvx / stdio** (PyPI, when published):
 
 ```json
 {
   "mcpServers": {
     "birdweather": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/pfrederiksen/birdweather-mcp", "birdweather-mcp"]
+      "args": ["birdweather-mcp"]
     }
   }
 }
 ```
 
-### Claude Code
+From git: `"args": ["--from", "git+https://github.com/pfrederiksen/birdweather-mcp", "birdweather-mcp"]`.
 
-```bash
-claude mcp add birdweather -- uvx --from git+https://github.com/pfrederiksen/birdweather-mcp birdweather-mcp
-```
-
-Or a project `.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "birdweather": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/pfrederiksen/birdweather-mcp", "birdweather-mcp"]
-    }
-  }
-}
-```
-
-### VS Code
-
-`.vscode/mcp.json`:
-
-```json
-{
-  "servers": {
-    "birdweather": {
-      "type": "stdio",
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/pfrederiksen/birdweather-mcp", "birdweather-mcp"]
-    }
-  }
-}
-```
-
-### Generic MCP / HTTP
-
-Any stdio MCP client can spawn `birdweather-mcp` the same way. For a remote streamable-HTTP server (see [docs/self-hosting.md](docs/self-hosting.md)):
+**streamable-HTTP** (self-hosted):
 
 ```json
 {
@@ -189,7 +130,7 @@ Any stdio MCP client can spawn `birdweather-mcp` the same way. For a remote stre
 }
 ```
 
-Exact key names vary slightly by client version — prefer `url` / `type: "http"` as documented by your client.
+If `MCP_AUTH_TOKEN` is set on the server, include `Authorization: Bearer …` (see [docs/clients.md](docs/clients.md)).
 
 ## Environment variables
 
@@ -204,6 +145,7 @@ Exact key names vary slightly by client version — prefer `url` / `type: "http"
 | `BIRDWEATHER_CACHE_MAX_ENTRIES` | No | Max cached responses (default `256`). |
 | `BIRDWEATHER_CACHE_ENABLED` | No | Set `false`/`0` to disable caching. |
 | `BIRDWEATHER_MAX_RETRIES` | No | Retries with backoff+jitter on 429/5xx/timeouts (default `5`). |
+| `MCP_AUTH_TOKEN` | No | When set, HTTP `/mcp` requires `Authorization: Bearer …`. `/health` stays open. Never logged. |
 
 See `.env.example` for a local template. Streamable-HTTP also serves `GET /health` (no upstream call) for container healthchecks.
 
@@ -285,7 +227,8 @@ flowchart TB
 Run as a long-lived Docker / compose service (LAN, Tailscale, Synology Container Manager, arm64 builds): **[docs/self-hosting.md](docs/self-hosting.md)**.
 
 ```bash
-docker compose up -d --build
+docker compose pull && docker compose up -d
+# Image: ghcr.io/pfrederiksen/birdweather-mcp:latest
 # MCP endpoint: http://127.0.0.1:8000/mcp
 ```
 

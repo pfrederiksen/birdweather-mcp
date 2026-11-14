@@ -38,3 +38,4 @@ reference/
 *.db
 .uv/
 uv.lock
+dist/

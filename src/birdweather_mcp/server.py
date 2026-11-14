@@ -14,6 +14,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
 from birdweather_mcp import __version__
+from birdweather_mcp.auth import auth_token_from_env, wrap_app_with_optional_auth
 from birdweather_mcp.client import BirdWeatherClient, BirdWeatherError
 
 logger = logging.getLogger("birdweather_mcp")
@@ -344,6 +345,27 @@ def search_stations(
         return _err(exc)
 
 
+def _install_optional_http_auth() -> None:
+    """Wrap HTTP ASGI apps with bearer auth when ``MCP_AUTH_TOKEN`` is set."""
+    if not auth_token_from_env():
+        return
+
+    _orig_streamable = mcp.streamable_http_app
+    _orig_sse = mcp.sse_app
+
+    def streamable_http_app_with_auth():
+        return wrap_app_with_optional_auth(_orig_streamable())
+
+    def sse_app_with_auth(mount_path: str | None = None):
+        return wrap_app_with_optional_auth(_orig_sse(mount_path))
+
+    mcp.streamable_http_app = streamable_http_app_with_auth  # type: ignore[method-assign]
+    mcp.sse_app = sse_app_with_auth  # type: ignore[method-assign]
+    logger.info(
+        "HTTP bearer auth enabled (MCP_AUTH_TOKEN set; /health remains open)"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="BirdWeather MCP server",
@@ -391,6 +413,7 @@ def main() -> None:
                 ", ".join(security.allowed_hosts),
             )
 
+    _install_optional_http_auth()
     mcp.run(transport=args.transport)
 
 

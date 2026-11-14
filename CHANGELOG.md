@@ -5,6 +5,19 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] — 2026-11-14
+
+### Added
+
+- GitHub Actions workflow to publish multi-arch Docker images to `ghcr.io/pfrederiksen/birdweather-mcp` (`latest` + SHA on `main`; semver on version tags).
+- PyPI-oriented packaging metadata and a trusted-publishing release workflow on version tags (configure the publisher on pypi.org; this repo does not publish automatically until that is set up).
+- Optional `MCP_AUTH_TOKEN` bearer auth for HTTP mode (`/health` stays open).
+- `server.json` for MCP registry metadata and [docs/clients.md](docs/clients.md) for Claude Desktop / Cursor / uvx / HTTP configs.
+
+### Changed
+
+- `docker-compose.yml` and self-hosting / Synology docs prefer pulling the prebuilt GHCR image; build-from-source remains an alternative.
+
 ## [0.1.2] — 2026-11-14
 
 ### Added
@@ -39,6 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docs: README, self-hosting guide, tool reference with live samples, contributing, security policy.
 - Pytest suite with mocked unit tests and optional `@pytest.mark.live` smoke (set `BIRDWEATHER_TEST_STATION_ID`).
 
+[0.1.3]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.1.3
 [0.1.2]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.1.2
 [0.1.1]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.1.1
 [0.1.0]: https://github.com/pfrederiksen/birdweather-mcp/releases/tag/v0.1.0
