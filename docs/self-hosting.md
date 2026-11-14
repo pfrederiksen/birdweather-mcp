@@ -6,14 +6,24 @@ Run birdweather-mcp as a **long-lived streamable-HTTP** service so MCP clients o
 
 ## Quick start (Docker Compose)
 
-From the repo root:
+**Prefer the prebuilt multi-arch image** from GitHub Container Registry (`linux/amd64` + `linux/arm64`):
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+- Image: `ghcr.io/pfrederiksen/birdweather-mcp:latest` (also tagged by git SHA and semver on version tags)
+- MCP endpoint: `http://127.0.0.1:8000/mcp`
+- Optional tokens: put `BIRDWEATHER_STATION_TOKEN=...` and/or `MCP_AUTH_TOKEN=...` in a gitignored `.env` (mode `600`) next to `docker-compose.yml`, or use `env_file` — never inline secrets in compose.
+
+If the GHCR package is private, authenticate once (`docker login ghcr.io`) with a GitHub token that can `read:packages`, or ask the maintainer to make the package public.
+
+**Build from source** (alternative): uncomment `build: .` in `docker-compose.yml` (and optionally set `image: birdweather-mcp:local`), then:
 
 ```bash
 docker compose up -d --build
 ```
-
-- MCP endpoint: `http://127.0.0.1:8000/mcp`
-- Optional token: put `BIRDWEATHER_STATION_TOKEN=...` in a gitignored `.env` (mode `600`) next to `docker-compose.yml`, or use `env_file` — never inline the token in compose.
 
 Check status:
 
@@ -31,7 +41,8 @@ docker compose down
 ### Plain Docker
 
 ```bash
-docker build -t birdweather-mcp .
+# Preferred: pull prebuilt
+docker pull ghcr.io/pfrederiksen/birdweather-mcp:latest
 docker run --rm -d \
   --name birdweather-mcp \
   -e MCP_TRANSPORT=streamable-http \
@@ -39,7 +50,10 @@ docker run --rm -d \
   -e MCP_PORT=8000 \
   --env-file .env \
   -p 127.0.0.1:8000:8000 \
-  birdweather-mcp --transport streamable-http --host 0.0.0.0 --port 8000
+  ghcr.io/pfrederiksen/birdweather-mcp:latest --transport streamable-http --host 0.0.0.0 --port 8000
+
+# Alternative: build from this repo
+docker build -t birdweather-mcp:local .
 ```
 
 Inside the container `MCP_HOST=0.0.0.0` is correct (listen on the container network). The **host** publish flag `-p 127.0.0.1:8000:8000` is what keeps it off the public interface.
@@ -124,11 +138,15 @@ curl -s http://127.0.0.1:8000/health
 ## Updating
 
 ```bash
-git pull
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
-Or rebuild a tagged image and recreate the container. Compose `restart: unless-stopped` brings the new container back on reboot.
+Or, when building from source: `git pull && docker compose up -d --build`. Compose `restart: unless-stopped` brings the new container back on reboot.
+
+### Optional HTTP bearer auth (`MCP_AUTH_TOKEN`)
+
+When `MCP_AUTH_TOKEN` is set, requests to `/mcp` (and other non-public routes) must include `Authorization: Bearer <token>`. **`GET /health` stays open** for probes. The token is never logged. Leave unset for open LAN/Tailscale use behind your own network controls.
 
 ## Synology NAS (Container Manager)
 
@@ -146,11 +164,21 @@ Use a shared folder path such as:
 
 In File Station / Container Manager, share paths look like `/docker/...` (not `/volume1/docker/...`). Keep the project files there so Container Manager can find `docker-compose.yml`.
 
-### Build off-NAS (recommended on low-RAM devices)
+### Prefer GHCR pull (Container Manager registry)
 
-Do **not** run `docker build` / `compose build` on a 1 GB NAS (e.g. DS223j) while other containers are running — builds often OOM or thrash.
+On Synology **Container Manager** → **Registry** (or Image → Add → From URL / registry), pull:
 
-On a desktop (or CI) with Docker Buildx:
+`ghcr.io/pfrederiksen/birdweather-mcp:latest`
+
+Point `docker-compose.yml` at that image (the repo compose file already does). No local build required on the NAS.
+
+If the package is private, log in to `ghcr.io` in Container Manager with a GitHub PAT that has `read:packages`.
+
+### Build off-NAS (alternative on low-RAM devices)
+
+Do **not** run `docker build` / `compose build` on a 1 GB NAS (e.g. DS223j) while other containers are running — builds often OOM or thrash. Prefer the GHCR pull above.
+
+If you must build locally, use a desktop (or CI) with Docker Buildx:
 
 ```bash
 # From a checkout of this repo
@@ -165,7 +193,7 @@ Copy the archive to the NAS share (if modern `scp` fails with `subsystem request
 scp -O birdweather-mcp-arm64.tar admin@192.168.1.10:/docker/apps/birdweather-mcp/
 ```
 
-Then in **Container Manager** → **Image** → **Add** → **From File**, import `birdweather-mcp-arm64.tar` from `/docker/apps/birdweather-mcp/`. Tag/name it `birdweather-mcp:local` so it matches compose.
+Then in **Container Manager** → **Image** → **Add** → **From File**, import `birdweather-mcp-arm64.tar` from `/docker/apps/birdweather-mcp/`. Tag/name it `birdweather-mcp:local` and set compose `image:` accordingly.
 
 DSM often has **no `git`**. Prefer File Station upload, `scp -O`, or sync the compose + `.env` files rather than cloning on the NAS.
 
@@ -185,7 +213,7 @@ Point compose at that file — **do not** put the token in the `environment:` bl
 ```yaml
 services:
   birdweather-mcp:
-    image: birdweather-mcp:local
+    image: ghcr.io/pfrederiksen/birdweather-mcp:latest
     container_name: birdweather-mcp
     restart: unless-stopped
     env_file:
@@ -218,7 +246,7 @@ Then open `http://192.168.1.10:18000/mcp` (or the MagicDNS name on that port).
 
 1. Install **Container Manager** from Package Center.
 2. Place `docker-compose.yml` + mode-`600` `.env` under `/docker/apps/birdweather-mcp/`.
-3. Import the pre-built `birdweather-mcp:local` image (see above) **before** expecting a successful start.
+3. Pull `ghcr.io/pfrederiksen/birdweather-mcp:latest` (or import a local build) **before** expecting a successful start.
 4. **Project** → **Create** → select `/docker/apps/birdweather-mcp/`.
 5. Build/create the project once. Starting a project that was never built/created yet can fail with **error 2202** — create/build first, then start.
 6. Keep the **Container Manager web portal** disabled / not exposed; manage via DSM UI or SSH as needed.

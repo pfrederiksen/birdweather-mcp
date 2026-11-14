@@ -1,0 +1,53 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.pfrederiksen/birdweather-mcp",
+  "title": "BirdWeather",
+  "description": "MCP server for BirdWeather station detections, species, and stats.",
+  "websiteUrl": "https://github.com/pfrederiksen/birdweather-mcp",
+  "repository": {
+    "url": "https://github.com/pfrederiksen/birdweather-mcp",
+    "source": "github"
+  },
+  "version": "0.1.3",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "birdweather-mcp",
+      "version": "0.1.3",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "BIRDWEATHER_STATION_TOKEN",
+          "description": "Optional station REST API token (never logged).",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    },
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/pfrederiksen/birdweather-mcp:0.1.3",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "BIRDWEATHER_STATION_TOKEN",
+          "description": "Optional station REST API token (never logged).",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "MCP_AUTH_TOKEN",
+          "description": "Optional bearer token required for HTTP /mcp (not /health).",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
