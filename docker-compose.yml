@@ -44,6 +44,13 @@ services:
       # Optional HTTP bearer auth for /mcp (not /health). Never logged.
       MCP_AUTH_TOKEN: ${MCP_AUTH_TOKEN:-}
       # Optional: MCP_ALLOWED_HOSTS=nas.example.local:*
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
     healthcheck:
       test:
         [
