@@ -100,6 +100,89 @@ def build_period(
     return {"from": start.isoformat(), "to": end.isoformat(), "timezone": tz}
 
 
+def detection_local_date(timestamp: str, timezone: str) -> date:
+    """Calendar date of a detection timestamp in the given IANA timezone."""
+    text = str(timestamp).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise BirdWeatherError(f"Invalid detection timestamp '{timestamp}'") from exc
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+    return dt.astimezone(ZoneInfo(resolve_timezone(timezone))).date()
+
+
+def aggregate_daily_counts(
+    detections: list[dict[str, Any]],
+    *,
+    period: dict[str, Any],
+    include_species_breakdown: bool = True,
+) -> list[dict[str, Any]]:
+    """Bucket detections into station-local calendar days within ``period``.
+
+    BirdWeather's ``dailyDetectionCounts`` GraphQL field buckets by UTC day even
+    when a timezone is supplied, and may return an extra following-day row when
+    ``from == to``. This helper re-aggregates from detection timestamps instead
+    and drops any day outside the requested inclusive range.
+    """
+    tz_name = resolve_timezone(period.get("timezone"))
+    start = _parse_date(period["from"])
+    end = _parse_date(period["to"])
+
+    totals: dict[date, int] = {}
+    by_species: dict[date, dict[str, dict[str, Any]]] = {}
+
+    for det in detections:
+        ts = det.get("timestamp")
+        if not ts:
+            continue
+        local_day = detection_local_date(str(ts), tz_name)
+        if local_day < start or local_day > end:
+            continue
+        totals[local_day] = totals.get(local_day, 0) + 1
+        if not include_species_breakdown:
+            continue
+        species = det.get("species") or {}
+        sid = str(det.get("speciesId") or species.get("id") or "")
+        if not sid:
+            continue
+        day_map = by_species.setdefault(local_day, {})
+        entry = day_map.get(sid)
+        if entry is None:
+            day_map[sid] = {
+                "count": 1,
+                "speciesId": sid,
+                "species": {
+                    "id": sid,
+                    "commonName": species.get("commonName"),
+                    "scientificName": species.get("scientificName"),
+                },
+            }
+        else:
+            entry["count"] += 1
+
+    rows: list[dict[str, Any]] = []
+    day = start
+    while day <= end:
+        row: dict[str, Any] = {
+            "date": day.isoformat(),
+            "dayOfYear": day.timetuple().tm_yday,
+            "total": totals.get(day, 0),
+        }
+        if include_species_breakdown:
+            counts = list(by_species.get(day, {}).values())
+            counts.sort(key=lambda c: (-int(c["count"]), str(c["speciesId"])))
+            row["counts"] = counts
+        rows.append(row)
+        day += timedelta(days=1)
+
+    # Newest first — matches typical BirdWeather dailyDetectionCounts ordering.
+    rows.reverse()
+    return rows
+
+
 def bbox_from_point(lat: float, lon: float, radius_km: float) -> tuple[dict, dict]:
     """Approximate NE/SW corners for a radius around a point."""
     if not (-90.0 <= lat <= 90.0):
@@ -463,34 +546,66 @@ class BirdWeatherClient:
         species: str | int | None = None,
         include_species_breakdown: bool = True,
     ) -> dict[str, Any]:
+        """Per-day totals in the station (or requested) timezone.
+
+        Aggregates detection timestamps into local calendar days rather than
+        trusting GraphQL ``dailyDetectionCounts`` (UTC-bucketed, can overshoot
+        the requested range).
+        """
         tz = timezone or self.get_station_timezone(station_id)
         period = build_period(
             from_date=from_date, to_date=to_date, days=days, timezone=tz
         )
         species_id = self.resolve_species_id(species)
-        variables: dict[str, Any] = {
-            "stationIds": [str(station_id)],
-            "period": period,
-        }
-        if species_id:
-            variables["speciesIds"] = [species_id]
-        data = self.graphql(queries.DAILY_COUNTS, variables)
-        rows = data.get("dailyDetectionCounts") or []
-        if not include_species_breakdown:
-            rows = [
-                {
-                    "date": r.get("date"),
-                    "dayOfYear": r.get("dayOfYear"),
-                    "total": r.get("total"),
-                }
-                for r in rows
-            ]
+        detections = self._iter_detections(
+            station_id, period=period, species_id=species_id
+        )
+        rows = aggregate_daily_counts(
+            detections,
+            period=period,
+            include_species_breakdown=include_species_breakdown,
+        )
         return {
             "station_id": str(station_id),
             "period": period,
             "days": rows,
             "source": "graphql",
         }
+
+    def _iter_detections(
+        self,
+        station_id: str | int,
+        *,
+        period: dict[str, Any],
+        species_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fetch all detections in a period (paginated)."""
+        nodes: list[dict[str, Any]] = []
+        after: str | None = None
+        while True:
+            variables: dict[str, Any] = {
+                "id": str(station_id),
+                "first": MAX_PAGE_SIZE,
+                "after": after,
+                "period": period,
+                "sortBy": "timestampDesc",
+            }
+            if species_id:
+                variables["speciesId"] = species_id
+            data = self.graphql(queries.DETECTIONS, variables)
+            station = data.get("station")
+            if not station:
+                raise BirdWeatherError(f"Station {station_id} not found")
+            det = station.get("detections") or {}
+            batch = det.get("nodes") or []
+            nodes.extend(batch)
+            page_info = det.get("pageInfo") or {}
+            if not page_info.get("hasNextPage"):
+                break
+            after = page_info.get("endCursor")
+            if not after:
+                break
+        return nodes
 
     def species_info(
         self,

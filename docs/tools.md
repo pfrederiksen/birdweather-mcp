@@ -241,6 +241,8 @@ Per-day totals, optionally with per-species breakdown.
 | `species` | string | no | filter to one species |
 | `include_species_breakdown` | bool | no | `true` |
 
+**Timezone / range behavior:** BirdWeather’s public `dailyDetectionCounts` GraphQL field buckets by **UTC calendar day** even when a timezone is passed, and can return an extra following-day row when `from_date == to_date`. This tool instead loads detections for the requested period and **re-aggregates them into local calendar days** in the station timezone (or the explicit `timezone` you pass). The result always includes one row per inclusive local date in `[from, to]` (quiet days have `total: 0`) and never includes days outside that range. Newer dates are listed first. Large windows on busy stations may take longer because detections are paginated.
+
 ```json
 {
   "station_id": "12345",
