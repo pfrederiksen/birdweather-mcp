@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import ipaddress
 import json
 import logging
 import os
+import re
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp_types import CallToolResult, InputRequiredResult, TextContent
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
@@ -24,6 +27,108 @@ from birdweather_mcp.client import (
 )
 
 logger = logging.getLogger("birdweather_mcp")
+
+# Common mistaken names → preferred params (only suggested when present on the tool).
+_ARG_ALIASES: dict[str, tuple[str, ...]] = {
+    "period": ("days", "from_date", "to_date"),
+    "from_date": ("since",),
+    "to_date": ("until",),
+    "start_date": ("from_date", "since"),
+    "end_date": ("to_date", "until"),
+    "start": ("from_date", "since"),
+    "end": ("to_date", "until"),
+    "window": ("days",),
+    "range": ("days", "from_date", "to_date"),
+    "time_range": ("days", "from_date", "to_date"),
+    "date_range": ("days", "from_date", "to_date"),
+    "since": ("from_date",),
+    "until": ("to_date",),
+}
+
+_TIME_WINDOW_ARG_RE = re.compile(
+    r"(period|range|window|date|since|until|from|to|start|end|duration|interval)",
+    re.IGNORECASE,
+)
+
+
+def _suggest_arg(unknown: str, valid: list[str]) -> str | None:
+    """Return a close-match or alias suggestion for an unknown argument name."""
+    valid_set = set(valid)
+    for alias in _ARG_ALIASES.get(unknown, ()):
+        if alias in valid_set:
+            return alias
+    matches = difflib.get_close_matches(unknown, valid, n=1, cutoff=0.6)
+    return matches[0] if matches else None
+
+
+def _unknown_arguments_message(
+    tool_name: str, unknown: list[str], valid: list[str]
+) -> str:
+    """Build a clear error for unexpected tools/call argument keys."""
+    unknown_list = ", ".join(sorted(unknown))
+    valid_list = ", ".join(valid)
+    msg = (
+        f"Unknown argument(s) for {tool_name}: {unknown_list}. "
+        f"Valid arguments: {valid_list}."
+    )
+    suggestions: list[str] = []
+    for name in sorted(unknown):
+        suggestion = _suggest_arg(name, valid)
+        if suggestion:
+            suggestions.append(f"Did you mean {suggestion!r} instead of {name!r}?")
+    if suggestions:
+        msg += " " + " ".join(suggestions)
+    valid_set = set(valid)
+    has_days_window = {"days", "from_date", "to_date"} <= valid_set
+    if has_days_window and any(_TIME_WINDOW_ARG_RE.search(name) for name in unknown):
+        msg += (
+            " For a time window use days=N or from_date/to_date (YYYY-MM-DD)."
+        )
+    return msg
+
+
+def _advertise_no_additional_properties(server: MCPServer) -> None:
+    """Mark each tool input schema as rejecting extras (SDK ArgModelBase still allows them)."""
+    for tool in server._tool_manager.list_tools():
+        params = tool.parameters
+        if isinstance(params, dict):
+            params["additionalProperties"] = False
+
+
+class BirdWeatherMCPServer(MCPServer):
+    """MCPServer that rejects unknown tools/call argument keys before dispatch.
+
+    The protocol path (stdio / streamable-HTTP / SSE) routes through
+    ``_handle_call_tool`` → ``MCPServer.call_tool``, so this override applies
+    over every transport. Extra keys are otherwise silently dropped by the
+    SDK's ArgModelBase (Pydantic ``extra='ignore'``).
+    """
+
+    async def call_tool(  # type: ignore[override]
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: Any | None = None,
+    ) -> CallToolResult | InputRequiredResult:
+        tool = self._tool_manager.get_tool(name)
+        if tool is not None and arguments:
+            props = (tool.parameters or {}).get("properties") or {}
+            if isinstance(props, dict) and props:
+                unknown = [key for key in arguments if key not in props]
+                if unknown:
+                    valid = list(props.keys())
+                    message = _unknown_arguments_message(name, unknown, valid)
+                    # is_error tool result (not a JSON-RPC protocol error).
+                    return CallToolResult(
+                        content=[
+                            TextContent(
+                                type="text",
+                                text=json.dumps({"error": message}),
+                            )
+                        ],
+                        is_error=True,
+                    )
+        return await super().call_tool(name, arguments, context)
 
 
 class TokenRedactFilter(logging.Filter):
@@ -94,7 +199,7 @@ _DEFAULT_ALLOWED_ORIGINS = [
     "http://[::1]:*",
 ]
 
-mcp = MCPServer(
+mcp = BirdWeatherMCPServer(
     "birdweather",
     instructions=(
         "Query BirdWeather stations: detections, top species, daily counts, "
@@ -102,7 +207,9 @@ mcp = MCPServer(
         "species info, and nearby stations. Public GraphQL needs no auth. "
         "Set BIRDWEATHER_STATION_TOKEN for richer station REST data. "
         "Use IANA timezones (e.g. America/Los_Angeles). Station IDs are numeric "
-        "(see app.birdweather.com/stations/<id>)."
+        "(see app.birdweather.com/stations/<id>). "
+        "Unknown tool arguments are rejected; use days or from_date/to_date "
+        "for time windows (there is no period parameter)."
     ),
     version=__version__,
 )
@@ -289,9 +396,11 @@ def station_counts(
     days: int | None = 7,
     timezone: str | None = None,
 ) -> str:
-    """Detection and unique-species counts for a station over a period.
+    """Detection and unique-species counts for a station over a time window.
 
-    Prefer `days` (default 7) or an explicit from_date/to_date (YYYY-MM-DD).
+    Time window (station-local calendar days; no `period` parameter):
+    - `days` (default 7): last N days including today, or
+    - `from_date` / `to_date` as YYYY-MM-DD in station-local time.
     Timezone defaults to the station's timezone.
     """
     try:
@@ -335,9 +444,10 @@ def recent_detections(
 ) -> str:
     """List recent detections for a station.
 
-    Filters: optional species (id, common name, or scientific name), min_confidence (0–1),
-    and a time window via days (default 1) or from_date/to_date. Use `after` with the
-    previous page_info.endCursor for pagination. When BIRDWEATHER_STATION_TOKEN is set,
+    Filters: optional species (id, common name, or scientific name), min_confidence (0–1).
+    Time window (station-local; no `period` parameter): `days` (default 1) or
+    `from_date` / `to_date` as YYYY-MM-DD. Use `after` with the previous
+    page_info.endCursor for pagination. When BIRDWEATHER_STATION_TOKEN is set,
     the station REST API is preferred (extra fields like image URLs).
     """
     try:
@@ -370,7 +480,11 @@ def top_species(
     limit: int = 25,
     offset: int = 0,
 ) -> str:
-    """Top species by detection count for a station and period (species_list)."""
+    """Top species by detection count for a station (alias: species_list).
+
+    Time window (station-local; no `period` parameter): `days` (default 7) or
+    `from_date` / `to_date` as YYYY-MM-DD.
+    """
     try:
         sid = validate_station_id(station_id)
         with _client() as client:
@@ -399,7 +513,11 @@ def species_list(
     limit: int = 50,
     offset: int = 0,
 ) -> str:
-    """Alias for top_species: species heard at a station in a period, ranked by count."""
+    """Alias for top_species: species heard at a station, ranked by count.
+
+    Time window (station-local; no `period` parameter): `days` (default 7) or
+    `from_date` / `to_date` as YYYY-MM-DD.
+    """
     return top_species(
         station_id=station_id,
         from_date=from_date,
@@ -421,7 +539,11 @@ def daily_counts(
     species: str | None = None,
     include_species_breakdown: bool = True,
 ) -> str:
-    """Per-day detection totals (and optional per-species breakdown) for a station."""
+    """Per-day detection totals (and optional per-species breakdown) for a station.
+
+    Time window (station-local; no `period` parameter): `days` (default 7) or
+    `from_date` / `to_date` as YYYY-MM-DD.
+    """
     try:
         sid = validate_station_id(station_id)
         with _client() as client:
@@ -512,7 +634,11 @@ def species_trend(
     timezone: str | None = None,
     granularity: str = "day",
 ) -> str:
-    """Counts over time for one species at a station (station-local days or weeks)."""
+    """Counts over time for one species at a station (station-local days or weeks).
+
+    Time window (station-local; no `period` parameter): `days` (default 30) or
+    `from_date` / `to_date` as YYYY-MM-DD. Granularity is ``day`` or ``week``.
+    """
     try:
         sid = validate_station_id(station_id)
         with _client() as client:
@@ -542,7 +668,9 @@ def first_of_year(
 ) -> str:
     """Species whose first detection of the year (or season) falls in the arrival window.
 
-    Default arrival window is the last 14 days of the season (Jan 1–today, or since/until).
+    Season bounds use ``since`` / ``until`` as YYYY-MM-DD in station-local time
+    (not ``from_date`` / ``to_date`` or ``period``). Default season is Jan 1–today;
+    the arrival window is the last 14 days of that season.
     """
     try:
         sid = validate_station_id(station_id)
@@ -570,7 +698,11 @@ def new_arrivals(
     timezone: str | None = None,
     limit: int = 50,
 ) -> str:
-    """Alias for first_of_year: new species arrivals in the recent arrival window."""
+    """Alias for first_of_year: new species arrivals in the recent arrival window.
+
+    Season bounds use ``since`` / ``until`` as YYYY-MM-DD (not ``from_date`` /
+    ``to_date`` or ``period``).
+    """
     return first_of_year(
         station_id=station_id,
         year=year,
@@ -591,7 +723,11 @@ def compare_stations(
     timezone: str | None = None,
     limit: int = 100,
 ) -> str:
-    """Compare species lists for two stations over the same period (overlap and uniques)."""
+    """Compare species lists for two stations over the same window (overlap and uniques).
+
+    Time window (station-local; no `period` parameter): `days` (default 7) or
+    `from_date` / `to_date` as YYYY-MM-DD.
+    """
     try:
         a = validate_station_id(station_a)
         b = validate_station_id(station_b)
@@ -620,7 +756,12 @@ def activity_by_hour(
     timezone: str | None = None,
     species: str | None = None,
 ) -> str:
-    """Hourly detection histogram in station-local time (optional species filter)."""
+    """Hourly detection histogram in station-local time (optional species filter).
+
+    Time window (station-local; no `period` parameter): `days` (default 7) or
+    `from_date` / `to_date` as YYYY-MM-DD. There is no ``hours`` argument —
+    the result always covers hours 0–23.
+    """
     try:
         sid = validate_station_id(station_id)
         with _client() as client:
@@ -636,6 +777,11 @@ def activity_by_hour(
             )
     except Exception as exc:  # noqa: BLE001
         return _err(exc)
+
+
+# Advertise strict object schemas. The SDK's ArgModelBase still ignores extras at
+# validation time; BirdWeatherMCPServer.call_tool rejects them before dispatch.
+_advertise_no_additional_properties(mcp)
 
 
 def _install_optional_http_auth() -> None:
