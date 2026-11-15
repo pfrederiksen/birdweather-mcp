@@ -14,6 +14,8 @@
 
 # birdweather-mcp
 
+<!-- mcp-name: io.github.pfrederiksen/birdweather-mcp -->
+
 Self-hostable [MCP](https://modelcontextprotocol.io) server for [BirdWeather](https://www.birdweather.com). Point Claude, Cursor, or any MCP client at your (or any public) station and ask natural-language questions about what was detected, what’s trending, and what’s nearby.
 
 Works out of the box against the **public GraphQL API** — no account required. Optionally set a **station token** for richer REST fields. **The token is never logged or echoed.**

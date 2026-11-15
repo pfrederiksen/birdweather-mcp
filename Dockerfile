@@ -19,6 +19,8 @@ RUN pip install --no-cache-dir . \
 
 USER app
 
+LABEL io.modelcontextprotocol.server.name="io.github.pfrederiksen/birdweather-mcp"
+
 ENV MCP_TRANSPORT=stdio
 # Optional: BIRDWEATHER_STATION_TOKEN for station REST API (never logged)
 # Optional: MCP_AUTH_TOKEN for HTTP bearer auth (never logged)

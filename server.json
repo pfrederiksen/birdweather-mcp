@@ -8,13 +8,13 @@
     "url": "https://github.com/pfrederiksen/birdweather-mcp",
     "source": "github"
   },
-  "version": "0.2.4",
+  "version": "0.2.5",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "birdweather-mcp",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
@@ -25,12 +25,35 @@
           "description": "Optional station REST API token (never logged).",
           "isRequired": false,
           "isSecret": true
+        },
+        {
+          "name": "BIRDWEATHER_CACHE_TTL",
+          "description": "In-memory upstream cache TTL in seconds. Set 0 to disable.",
+          "default": "60",
+          "isRequired": false
+        },
+        {
+          "name": "BIRDWEATHER_CACHE_MAX_ENTRIES",
+          "description": "Max cached GraphQL/REST responses.",
+          "default": "256",
+          "isRequired": false
+        },
+        {
+          "name": "BIRDWEATHER_CACHE_ENABLED",
+          "description": "Set false/0/no/off to disable caching; true/1/yes/on to force on. Default: enabled when TTL > 0.",
+          "isRequired": false
+        },
+        {
+          "name": "BIRDWEATHER_MAX_RETRIES",
+          "description": "Retries with exponential backoff on HTTP 429/5xx and timeouts (min effective 1).",
+          "default": "5",
+          "isRequired": false
         }
       ]
     },
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/pfrederiksen/birdweather-mcp:0.2.4",
+      "identifier": "ghcr.io/pfrederiksen/birdweather-mcp:0.2.5",
       "transport": {
         "type": "stdio"
       },
@@ -40,6 +63,52 @@
           "description": "Optional station REST API token (never logged).",
           "isRequired": false,
           "isSecret": true
+        },
+        {
+          "name": "BIRDWEATHER_CACHE_TTL",
+          "description": "In-memory upstream cache TTL in seconds. Set 0 to disable.",
+          "default": "60",
+          "isRequired": false
+        },
+        {
+          "name": "BIRDWEATHER_CACHE_MAX_ENTRIES",
+          "description": "Max cached GraphQL/REST responses.",
+          "default": "256",
+          "isRequired": false
+        },
+        {
+          "name": "BIRDWEATHER_CACHE_ENABLED",
+          "description": "Set false/0/no/off to disable caching; true/1/yes/on to force on. Default: enabled when TTL > 0.",
+          "isRequired": false
+        },
+        {
+          "name": "BIRDWEATHER_MAX_RETRIES",
+          "description": "Retries with exponential backoff on HTTP 429/5xx and timeouts (min effective 1).",
+          "default": "5",
+          "isRequired": false
+        },
+        {
+          "name": "MCP_TRANSPORT",
+          "description": "Transport: stdio, streamable-http, or sse.",
+          "default": "stdio",
+          "isRequired": false
+        },
+        {
+          "name": "MCP_HOST",
+          "description": "Bind host for HTTP transports. Inside Docker use 0.0.0.0 and restrict on the host.",
+          "default": "127.0.0.1",
+          "isRequired": false
+        },
+        {
+          "name": "MCP_PORT",
+          "description": "Bind port for HTTP transports.",
+          "default": "8000",
+          "isRequired": false
+        },
+        {
+          "name": "MCP_ALLOWED_HOSTS",
+          "description": "Comma-separated Host header patterns for streamable-HTTP (e.g. nas.example.local:*). Unset = loopback only; * = any host.",
+          "isRequired": false
         },
         {
           "name": "MCP_AUTH_TOKEN",
