@@ -54,9 +54,10 @@ src/birdweather_mcp/
 docs/            # Installation, config, clients, tools, self-hosting, …
 tests/           # Unit tests + optional @pytest.mark.live
 .github/workflows/
-  ci.yml               # ruff + unit tests
-  docker-publish.yml   # GHCR multi-arch on main + tags
-  publish-pypi.yml     # PyPI trusted publishing on version tags
+  ci.yml                     # ruff + unit tests
+  docker-publish.yml         # GHCR multi-arch on main + tags
+  publish-pypi.yml           # PyPI trusted publishing on version tags
+  publish-mcp-registry.yml   # MCP Registry publish on GitHub release
 server.json      # MCP registry metadata
 docker-compose.yml
 ```
@@ -77,11 +78,16 @@ docker-compose.yml
    - `server.json` (top-level `version` and package version fields, including the GHCR tag)
    - `uv.lock` (project version pin) — run `uv lock` if needed
 2. **CHANGELOG.md** — add a Keep a Changelog entry for `X.Y.Z` with the release date.
-3. **Commit** on `main` (or a short-lived release branch merged to `main`).
-4. **Tag** `vX.Y.Z` and push the tag (maintainers only). That triggers:
+3. Keep ownership markers in sync with `server.json` `name` (`io.github.pfrederiksen/birdweather-mcp`):
+   - README HTML comment `<!-- mcp-name: io.github.pfrederiksen/birdweather-mcp -->`
+   - Dockerfile `LABEL io.modelcontextprotocol.server.name="io.github.pfrederiksen/birdweather-mcp"`
+4. Validate registry metadata locally (optional): install [`mcp-publisher`](https://github.com/modelcontextprotocol/registry/releases) and run `mcp-publisher validate server.json`.
+5. **Commit** on `main` (or a short-lived release branch merged to `main`).
+6. **Tag** `vX.Y.Z` and push the tag (maintainers only). That triggers:
    - **GHCR** (`.github/workflows/docker-publish.yml`): multi-arch `linux/amd64` + `linux/arm64` image `ghcr.io/pfrederiksen/birdweather-mcp` tagged with semver (`X.Y.Z`, `X.Y`) plus `latest` / SHA on `main`.
    - **PyPI** (`.github/workflows/publish-pypi.yml`): `uv build` + trusted publishing is configured and runs on `vX.Y.Z` tags (no API token secret in the workflow).
-5. **Homebrew tap** — update the formula in `pfrederiksen/homebrew-tap` (version, URL/sha256 for the release tarball or PyPI sdist) so `brew install pfrederiksen/tap/birdweather-mcp` tracks the new release.
+7. **GitHub Release** — publishing a release for that tag triggers **MCP Registry** publish (`.github/workflows/publish-mcp-registry.yml`): waits for PyPI + GHCR artifacts, then `mcp-publisher` via GitHub OIDC (no secrets). Use **workflow_dispatch** on that workflow to re-run if needed.
+8. **Homebrew tap** — update the formula in `pfrederiksen/homebrew-tap` (version, URL/sha256 for the release tarball or PyPI sdist) so `brew install pfrederiksen/tap/birdweather-mcp` tracks the new release.
 
 Do not publish tags from documentation-only dry runs unless you intend to ship.
 

@@ -138,4 +138,6 @@ If `MCP_AUTH_TOKEN` is set on the server, send a bearer header (exact client sup
 
 ## Registry metadata
 
-[`server.json`](../server.json) describes this server for the official MCP registry (PyPI + GHCR package entries). Publishing to the registry is a separate step from package releases.
+This server is listed in the [official MCP Registry](https://registry.modelcontextprotocol.io) as **`io.github.pfrederiksen/birdweather-mcp`**. MCP clients that support registry discovery can find and install it under that name.
+
+[`server.json`](../server.json) describes the PyPI and GHCR package entries (including environment variables). Registry publish runs automatically when a GitHub release is published — see [development.md](development.md).

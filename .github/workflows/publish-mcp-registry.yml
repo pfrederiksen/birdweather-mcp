@@ -1,0 +1,105 @@
+name: Publish to MCP Registry
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.9
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Download and verify mcp-publisher
+        run: |
+          set -euo pipefail
+          archive="mcp-publisher_linux_amd64.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          rm -f "$archive" "$archive.sigstore.json"
+
+      - name: Check server.json version matches release tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.ref_name }}
+        run: |
+          set -euo pipefail
+          EXPECTED="${RELEASE_TAG#v}"
+          ACTUAL="$(python3 -c 'import json; print(json.load(open("server.json"))["version"])')"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "server.json version ($ACTUAL) does not match release tag without v ($EXPECTED)" >&2
+            exit 1
+          fi
+          echo "VERSION=$EXPECTED" >> "$GITHUB_ENV"
+
+      - name: Wait for PyPI and GHCR artifacts
+        env:
+          PACKAGE_VERSION: ${{ env.VERSION }}
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 1800))
+          pypi_ok=0
+          ghcr_ok=0
+
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if [ "$pypi_ok" -eq 0 ]; then
+              if curl --fail --silent --show-error --output /dev/null \
+                "https://pypi.org/pypi/birdweather-mcp/${PACKAGE_VERSION}/json"; then
+                echo "PyPI artifact present for ${PACKAGE_VERSION}"
+                pypi_ok=1
+              fi
+            fi
+
+            if [ "$ghcr_ok" -eq 0 ]; then
+              token="$(curl --fail --silent --show-error \
+                "https://ghcr.io/token?scope=repository:pfrederiksen/birdweather-mcp:pull" \
+                | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+              if curl --fail --silent --show-error --output /dev/null --head \
+                -H "Authorization: Bearer ${token}" \
+                -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json" \
+                "https://ghcr.io/v2/pfrederiksen/birdweather-mcp/manifests/${PACKAGE_VERSION}"; then
+                echo "GHCR manifest present for ${PACKAGE_VERSION}"
+                ghcr_ok=1
+              fi
+            fi
+
+            if [ "$pypi_ok" -eq 1 ] && [ "$ghcr_ok" -eq 1 ]; then
+              exit 0
+            fi
+
+            echo "Waiting for artifacts (pypi=${pypi_ok} ghcr=${ghcr_ok})..."
+            sleep 30
+          done
+
+          echo "Timed out waiting for PyPI and/or GHCR artifacts for ${PACKAGE_VERSION}" >&2
+          exit 1
+
+      - name: Validate server.json
+        run: ./mcp-publisher validate server.json
+
+      - name: Authenticate to MCP Registry
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish to MCP Registry
+        run: ./mcp-publisher publish
