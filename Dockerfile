@@ -1,4 +1,4 @@
-# Multi-arch friendly: python:3.12-slim publishes linux/amd64 and linux/arm64.
+# Multi-arch friendly: python:3.15-slim publishes linux/amd64 and linux/arm64.
 # Build for Synology / Raspberry Pi / Apple Silicon:
 #   docker buildx build --platform linux/arm64 -t birdweather-mcp --load .
 # Multi-platform (registry push):
