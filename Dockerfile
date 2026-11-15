@@ -4,7 +4,7 @@
 # Multi-platform (registry push):
 #   docker buildx build --platform linux/amd64,linux/arm64 -t you/birdweather-mcp:latest --push .
 
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
