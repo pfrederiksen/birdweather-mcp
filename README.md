@@ -10,6 +10,7 @@
   <a href="https://pypi.org/project/birdweather-mcp/"><img src="https://img.shields.io/pypi/v/birdweather-mcp" alt="PyPI" /></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-compatible-green.svg" alt="MCP compatible" /></a>
   <a href="docs/self-hosting.md"><img src="https://img.shields.io/badge/docker-ready-2496ED.svg" alt="Docker ready" /></a>
+  <a href="https://glama.ai/mcp/servers/pfrederiksen/birdweather-mcp"><img src="https://glama.ai/mcp/servers/pfrederiksen/birdweather-mcp/badges/score.svg" alt="pfrederiksen/birdweather-mcp MCP server" /></a>
 </p>
 
 # birdweather-mcp
